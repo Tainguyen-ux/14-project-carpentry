@@ -1,0 +1,12 @@
+{
+  "name": "14-project-carpentry",
+  "version": "1.0.0",
+  "description": "Cloneable Google Apps Script Project Skeleton referencing Shared Core Library",
+  "scripts": {
+    "push": "npx @google/clasp push -f",
+    "deploy": "powershell -ExecutionPolicy Bypass -File .\\deploy.ps1",
+    "new-project": "powershell -ExecutionPolicy Bypass -File .\\scripts\\new-project.ps1",
+    "test": "node .\\tests\\run_template_integration.js"
+  },
+  "license": "MIT"
+}

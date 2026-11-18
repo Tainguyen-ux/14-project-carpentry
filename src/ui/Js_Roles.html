@@ -1,0 +1,905 @@
+<script>
+  /**
+   * Js_Roles.html
+   * Giao diện và tương tác Client cho phân hệ Quản lý Vai trò & Ma trận Phân quyền.
+   * Dự án: Base AppScript Framework
+   */
+
+  var ROLES_CLIENT = {
+    roles: [],
+    currentRoleId: null,
+    currentRoleData: null,
+    currentAssignedPermIds: [],
+    allModuleGroups: [],
+    isLoading: false,
+    searchTimeout: null,
+    currentPage: 1,
+    pageSize: 10,
+    pagination: null,
+    currentKeyword: "",
+
+    /**
+     * Khởi tạo phân hệ Vai trò khi người dùng mở view
+     */
+    init: function() {
+      if (this.isLoaded) return;
+      this.bindEvents();
+      this.loadRoles();
+    },
+
+    /**
+     * Gắn sự kiện giao diện
+     */
+    bindEvents: function() {
+      var self = this;
+
+      // Tìm kiếm với debounce 300ms
+      var searchInput = document.getElementById("roles-search-input");
+      if (searchInput && !searchInput.dataset.bound) {
+        searchInput.dataset.bound = "true";
+        searchInput.addEventListener("input", function() {
+          clearTimeout(self.searchTimeout);
+          var val = this.value.toLowerCase().trim();
+          self.searchTimeout = setTimeout(function() {
+            self.currentKeyword = val;
+            self.currentPage = 1;
+            self.loadRoles();
+          }, 300);
+        });
+      }
+    },
+
+    /**
+     * Lấy token xác thực từ bộ nhớ hoặc Storage
+     */
+    getToken: function() {
+      var token = APP.token;
+      if (!token) {
+        var session = APP.getSession();
+        if (session && session.token) {
+          token = session.token;
+          APP.token = token;
+        }
+      }
+      return token;
+    },
+
+    /**
+     * Tải danh sách vai trò từ máy chủ
+     */
+    loadRoles: function() {
+      var self = this;
+      var token = this.getToken();
+      if (!token) {
+        APP.showToast("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "info");
+        APP.switchView("auth");
+        return;
+      }
+
+      this.isLoading = true;
+      var loadingEl = document.getElementById("roles-table-loading");
+      var tbody = document.getElementById("roles-table-tbody");
+      var emptyEl = document.getElementById("roles-table-empty");
+      var mobileContainer = document.getElementById("roles-cards-mobile");
+
+      if (loadingEl) loadingEl.style.display = "flex";
+      if (tbody) tbody.innerHTML = "";
+      if (emptyEl) emptyEl.style.display = "none";
+      if (mobileContainer) mobileContainer.innerHTML = "";
+
+      if (typeof google === "undefined" || !google.script || !google.script.run) {
+        if (loadingEl) loadingEl.style.display = "none";
+        console.warn("Môi trường Apps Script không khả dụng.");
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (typeof APP !== "undefined" && APP.stopPageLoading) APP.stopPageLoading();
+          self.isLoading = false;
+          if (loadingEl) loadingEl.style.display = "none";
+
+          if (typeof response === "string") {
+            try { response = JSON.parse(response); } catch (e) {}
+          }
+
+          if (response && response.success && response.data) {
+            self.isLoaded = true;
+            self.roles = response.data.roles || [];
+            self.pagination = response.data.pagination || {
+              page: self.currentPage,
+              pageSize: self.pageSize,
+              total: response.data.total || self.roles.length,
+              totalPages: Math.ceil((response.data.total || self.roles.length) / self.pageSize) || 1,
+              startIndex: self.roles.length === 0 ? 0 : (self.currentPage - 1) * self.pageSize + 1,
+              endIndex: Math.min(self.currentPage * self.pageSize, response.data.total || self.roles.length),
+              hasNext: false,
+              hasPrev: false
+            };
+
+            // Cập nhật thống kê
+            var totalCount = self.pagination.total || self.roles.length;
+            var activeCount = self.roles.filter(function(r) { return r.status === "ACTIVE"; }).length;
+            var totalPerms = response.data.total_system_perms || 30;
+
+            var statTotal = document.getElementById("stat-roles-total");
+            var statActive = document.getElementById("stat-roles-active");
+            var statPerms = document.getElementById("stat-roles-perms");
+            var countBadge = document.getElementById("roles-count-badge");
+
+            if (statTotal) statTotal.textContent = totalCount;
+            if (statActive) statActive.textContent = activeCount;
+            if (statPerms) statPerms.textContent = totalPerms;
+            if (countBadge) countBadge.textContent = totalCount + " vai trò";
+
+            if (self.roles.length === 0) {
+              if (emptyEl) emptyEl.style.display = "block";
+              var pEl = document.getElementById("roles-pagination");
+              if (pEl) pEl.style.display = "none";
+            } else {
+              self.renderTable(self.roles);
+              self.renderMobileCards(self.roles);
+
+              // Render thanh phân trang chuẩn
+              APP.renderPagination("roles-pagination", self.pagination, function(newPage, newSize) {
+                self.currentPage = newPage;
+                self.pageSize = newSize;
+                self.loadRoles();
+              });
+            }
+          } else {
+            console.error("apiGetRolesList error:", response);
+            var msg = (response && response.message) ? response.message : "Không thể tải danh sách vai trò.";
+            APP.showToast(msg, "error");
+            if (emptyEl) emptyEl.style.display = "block";
+            var pEl2 = document.getElementById("roles-pagination");
+            if (pEl2) pEl2.style.display = "none";
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (typeof APP !== "undefined" && APP.stopPageLoading) APP.stopPageLoading();
+          self.isLoading = false;
+          if (loadingEl) loadingEl.style.display = "none";
+          var errMsg = err ? (err.message || String(err)) : "Không xác định";
+          console.error("apiGetRolesList RPC error:", err);
+          APP.showToast("Lỗi kết nối máy chủ: " + errMsg, "error");
+          if (emptyEl) emptyEl.style.display = "block";
+          var pEl3 = document.getElementById("roles-pagination");
+          if (pEl3) pEl3.style.display = "none";
+        })
+        .apiGetRolesList(token, { keyword: self.currentKeyword }, self.currentPage, self.pageSize);
+    },
+
+    /**
+     * Lọc danh sách vai trò theo từ khóa tìm kiếm
+     */
+    filterRoles: function(keyword) {
+      if (!keyword) {
+        this.renderTable(this.roles);
+        this.renderMobileCards(this.roles);
+        return;
+      }
+
+      var filtered = this.roles.filter(function(r) {
+        return (r.name || "").toLowerCase().indexOf(keyword) !== -1 ||
+               (r.code || "").toLowerCase().indexOf(keyword) !== -1 ||
+               (r.description || "").toLowerCase().indexOf(keyword) !== -1;
+      });
+
+      this.renderTable(filtered);
+      this.renderMobileCards(filtered);
+
+      var emptyEl = document.getElementById("roles-table-empty");
+      if (emptyEl) {
+        emptyEl.style.display = (filtered.length === 0) ? "block" : "none";
+      }
+    },
+
+    /**
+     * Lấy class màu tương ứng với vai trò
+     */
+    getRoleBadgeClass: function(roleCode) {
+      switch (roleCode) {
+        case "Admin": return "role-admin";
+        case "Sales": return "role-sales";
+        case "Prepress": return "role-prepress";
+        case "Production Manager": return "role-production";
+        case "Warehouse": return "role-warehouse";
+        case "QC": return "role-qc";
+        case "Accountant": return "role-accountant";
+        default: return "role-default";
+      }
+    },
+
+    /**
+     * Hiển thị bảng danh sách vai trò trên Desktop & Tablet
+     */
+    renderTable: function(roles) {
+      var tbody = document.getElementById("roles-table-tbody");
+      if (!tbody) return;
+
+      var self = this;
+      var html = "";
+
+      roles.forEach(function(r) {
+        var badgeClass = self.getRoleBadgeClass(r.code);
+        var isLocked = (r.status === "LOCKED" || r.status === "Đã khóa");
+        var isAdmin = r.is_admin_role;
+
+        // Trạng thái pill
+        var statusHtml = isLocked
+          ? '<span class="status-pill status-locked">Đã khóa</span>'
+          : '<span class="status-pill status-active">Hoạt động</span>';
+
+        // Quyền hạn badge & tiến độ
+        var permPercent = r.total_system_perms > 0 ? Math.round((r.permission_count / r.total_system_perms) * 100) : 0;
+        var permBadgeHtml = isAdmin
+          ? '<span class="role-badge role-admin" style="font-weight: 600;">Toàn quyền (' + r.permission_count + '/' + r.total_system_perms + ')</span>'
+          : '<div style="display: flex; flex-direction: column; gap: 4px;">' +
+              '<span style="font-size: 12px; font-weight: 600; color: var(--text-main);">' + r.permission_count + ' / ' + r.total_system_perms + ' quyền (' + permPercent + '%)</span>' +
+              '<div style="width: 120px; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;">' +
+                '<div style="width: ' + permPercent + '%; height: 100%; background: var(--primary); border-radius: 3px;"></div>' +
+              '</div>' +
+            '</div>';
+
+        // Nút thao tác
+        var actionsHtml = '<div class="btn-action-group">';
+
+        // Nút Phân quyền (Luôn có, dạng badge button nhỏ gọn)
+        actionsHtml += '<button type="button" class="btn btn-sm btn-primary" onclick="ROLES_CLIENT.openPermissionModal(\'' + r.id + '\')" title="Cấu hình ma trận phân quyền">' +
+          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+            '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>' +
+            '<path d="M7 11V7a5 5 0 0 1 10 0v4"></path>' +
+          '</svg>' +
+          '<span>Phân quyền</span>' +
+        '</button>';
+
+        // Nút Sửa vai trò
+        actionsHtml += '<button type="button" class="btn-icon-action btn-action-edit" onclick="ROLES_CLIENT.openEditModal(\'' + r.id + '\')" title="Chỉnh sửa vai trò">' +
+          '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+            '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>' +
+            '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>' +
+          '</svg>' +
+        '</button>';
+
+        // Nút Khóa / Mở khóa
+        if (!isAdmin) {
+          var lockIcon = isLocked
+            ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>'
+            : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>';
+          var lockClass = isLocked ? "btn-action-unlock" : "btn-action-lock";
+          var lockTitle = isLocked ? "Mở khóa vai trò" : "Khóa vai trò";
+          actionsHtml += '<button type="button" class="btn-icon-action ' + lockClass + '" onclick="ROLES_CLIENT.toggleRoleStatus(\'' + r.id + '\')" title="' + lockTitle + '">' + lockIcon + '</button>';
+        } else {
+          actionsHtml += '<button type="button" class="btn-icon-action" disabled title="Vai trò Quản trị viên tối cao (Admin) không thể khóa">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>' +
+          '</button>';
+        }
+
+        actionsHtml += '</div>';
+
+        html += '<tr>' +
+          '<td>' +
+            '<div style="display: flex; flex-direction: column; gap: 4px;">' +
+              '<span class="role-badge ' + badgeClass + '" style="align-self: flex-start; font-weight: 600;">' + self.escapeHtml(r.name) + '</span>' +
+              '<span style="font-size: 11px; color: #94a3b8; font-family: monospace;">' + self.escapeHtml(r.code) + '</span>' +
+            '</div>' +
+          '</td>' +
+          '<td><span style="font-size: 13px; color: var(--text-muted); line-height: 1.4;">' + self.escapeHtml(r.description || "Chưa có mô tả") + '</span></td>' +
+          '<td style="text-align: center;">' +
+            '<span style="display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text-main); font-size: 13px;">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>' +
+              r.user_count + ' nhân sự' +
+            '</span>' +
+          '</td>' +
+          '<td>' + permBadgeHtml + '</td>' +
+          '<td>' + statusHtml + '</td>' +
+          '<td style="text-align: right;">' + actionsHtml + '</td>' +
+        '</tr>';
+      });
+
+      tbody.innerHTML = html;
+    },
+
+    /**
+     * Hiển thị danh sách vai trò dạng Card trên Mobile
+     */
+    renderMobileCards: function(roles) {
+      var container = document.getElementById("roles-cards-mobile");
+      if (!container) return;
+
+      var self = this;
+      var html = "";
+
+      roles.forEach(function(r) {
+        var badgeClass = self.getRoleBadgeClass(r.code);
+        var isLocked = (r.status === "LOCKED" || r.status === "Đã khóa");
+        var isAdmin = r.is_admin_role;
+
+        var statusHtml = isLocked
+          ? '<span class="status-pill status-locked">Đã khóa</span>'
+          : '<span class="status-pill status-active">Hoạt động</span>';
+
+        html += '<div class="user-card-mobile" style="background: var(--surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px; margin-bottom: 12px;">' +
+          '<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">' +
+            '<div>' +
+              '<span class="role-badge ' + badgeClass + '" style="font-weight: 600; font-size: 13px;">' + self.escapeHtml(r.name) + '</span>' +
+              '<div style="font-size: 11px; color: #94a3b8; font-family: monospace; margin-top: 2px;">' + self.escapeHtml(r.code) + '</div>' +
+            '</div>' +
+            statusHtml +
+          '</div>' +
+          '<div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">' +
+            self.escapeHtml(r.description || "Chưa có mô tả") +
+          '</div>' +
+          '<div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; border-top: 1px solid var(--border-color); padding-top: 8px; margin-bottom: 10px;">' +
+            '<span>Nhân sự: <strong>' + r.user_count + '</strong></span>' +
+            '<span>Quyền hạn: <strong>' + r.permission_count + ' / ' + r.total_system_perms + '</strong></span>' +
+          '</div>' +
+          '<div style="display: flex; gap: 8px; justify-content: flex-end;">' +
+            '<button type="button" class="btn btn-sm btn-primary" onclick="ROLES_CLIENT.openPermissionModal(\'' + r.id + '\')" style="flex: 1;">' +
+              '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>' +
+                '<path d="M7 11V7a5 5 0 0 1 10 0v4"></path>' +
+              '</svg>' +
+              '<span>Phân quyền</span>' +
+            '</button>' +
+            '<button type="button" class="btn btn-sm btn-secondary" onclick="ROLES_CLIENT.openEditModal(\'' + r.id + '\')">Sửa</button>' +
+          '</div>' +
+        '</div>';
+      });
+
+      container.innerHTML = html;
+    },
+
+    /**
+     * Mở Modal Ma trận Phân quyền cho một Vai trò
+     */
+    openPermissionModal: function(roleId) {
+      var self = this;
+      var token = this.getToken();
+      if (!token) return;
+
+      this.currentRoleId = roleId;
+      this.activePermTab = "MENU";
+      this.assignedPermSet = {};
+      this.allPermsMap = {};
+
+      var modal = document.getElementById("modal-role-permissions");
+      var loadingEl = document.getElementById("perm-modal-loading");
+      var container = document.getElementById("perm-matrix-container");
+      var roleNameEl = document.getElementById("modal-perm-role-name");
+      var roleDescEl = document.getElementById("modal-perm-role-desc");
+      var adminBanner = document.getElementById("perm-admin-banner");
+      var saveBtn = document.getElementById("btn-submit-role-perms");
+      var selectTabBtn = document.getElementById("btn-perm-select-tab");
+      var deselectTabBtn = document.getElementById("btn-perm-deselect-tab");
+      var selectAllBtn = document.getElementById("btn-perm-select-all");
+
+      // Reset active tab button UI
+      var tabMenuBtn = document.getElementById("perm-tab-btn-menu");
+      var tabActionBtn = document.getElementById("perm-tab-btn-action");
+      if (tabMenuBtn) tabMenuBtn.classList.add("active");
+      if (tabActionBtn) tabActionBtn.classList.remove("active");
+
+      if (modal) modal.classList.add("open");
+      if (loadingEl) loadingEl.style.display = "flex";
+      if (container) container.innerHTML = "";
+      if (adminBanner) adminBanner.style.display = "none";
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (loadingEl) loadingEl.style.display = "none";
+
+          if (typeof response === "string") {
+            try { response = JSON.parse(response); } catch (e) {}
+          }
+
+          if (response && response.success && response.data) {
+            var data = response.data;
+            self.currentRoleData = data.role;
+            self.menuGroups = data.menu_groups || [];
+            self.actionGroups = data.action_groups || [];
+            self.allModuleGroups = data.module_groups || [];
+
+            // Thiết lập tập hợp các quyền đã cấp
+            self.assignedPermSet = {};
+            (data.assigned_permission_ids || []).forEach(function(pId) {
+              self.assignedPermSet[pId] = true;
+            });
+
+            // Lập bản đồ tra cứu toàn bộ quyền
+            self.allPermsMap = {};
+            self.menuGroups.forEach(function(g) {
+              (g.permissions || []).forEach(function(p) { self.allPermsMap[p.id] = p; });
+            });
+            self.actionGroups.forEach(function(g) {
+              (g.permissions || []).forEach(function(p) { self.allPermsMap[p.id] = p; });
+            });
+
+            if (roleNameEl) roleNameEl.textContent = data.role.name;
+            if (roleDescEl) roleDescEl.textContent = data.role.description || "Cấu hình quyền truy cập chức năng cho vai trò này.";
+
+            var isAdmin = data.role.is_admin_role;
+            if (adminBanner) adminBanner.style.display = isAdmin ? "flex" : "none";
+            if (saveBtn) saveBtn.style.display = isAdmin ? "none" : "";
+            if (selectTabBtn) selectTabBtn.style.display = isAdmin ? "none" : "";
+            if (deselectTabBtn) deselectTabBtn.style.display = isAdmin ? "none" : "";
+            if (selectAllBtn) selectAllBtn.style.display = isAdmin ? "none" : "";
+
+            self.renderCurrentTabMatrix();
+            self.updateSelectedCounts();
+          } else {
+            APP.showToast((response && response.message) ? response.message : "Không thể tải quyền hạn vai trò.", "error");
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (loadingEl) loadingEl.style.display = "none";
+          APP.showToast("Lỗi kết nối: " + (err ? err.message : String(err)), "error");
+        })
+        .apiGetRolePermissions(token, roleId);
+    },
+
+    /**
+     * Chuyển đổi giữa 2 Tầng Phân Quyền (Quyền Menu vs Quyền Thao tác)
+     * @param {string} tab "MENU" hoặc "ACTION"
+     */
+    switchPermTab: function(tab) {
+      this.activePermTab = tab;
+      var tabMenuBtn = document.getElementById("perm-tab-btn-menu");
+      var tabActionBtn = document.getElementById("perm-tab-btn-action");
+
+      if (tab === "MENU") {
+        if (tabMenuBtn) tabMenuBtn.classList.add("active");
+        if (tabActionBtn) tabActionBtn.classList.remove("active");
+      } else {
+        if (tabMenuBtn) tabMenuBtn.classList.remove("active");
+        if (tabActionBtn) tabActionBtn.classList.add("active");
+      }
+
+      this.renderCurrentTabMatrix();
+    },
+
+    /**
+     * Render cây quyền cho Tab hiện đang được chọn
+     */
+    renderCurrentTabMatrix: function() {
+      var container = document.getElementById("perm-matrix-container");
+      if (!container) return;
+
+      var self = this;
+      var isAdmin = self.currentRoleData && self.currentRoleData.is_admin_role;
+      var groups = (this.activePermTab === "MENU") ? this.menuGroups : this.actionGroups;
+
+      if (!groups || groups.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">' +
+          'Không có quyền nào trong danh mục này.</div>';
+        return;
+      }
+
+      var isMenuTab = (this.activePermTab === "MENU");
+      var tabBadgeClass = isMenuTab ? "perm-badge-menu" : "perm-badge-action";
+      var tabBadgeText = isMenuTab ? "MENU" : "ACTION";
+
+      var html = "";
+
+      groups.forEach(function(group, gIdx) {
+        var perms = group.permissions || [];
+        var allChecked = perms.every(function(p) { return isAdmin || !!self.assignedPermSet[p.id]; });
+
+        html += '<div class="perm-module-card" style="background: var(--surface); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 14px; overflow: hidden;">' +
+          // Header nhóm Module
+          '<div style="background: rgba(241, 245, 249, 0.75); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color);">' +
+            '<div style="display: flex; align-items: center; gap: 10px;">' +
+              (!isAdmin ? '<input type="checkbox" id="chk-group-' + gIdx + '" class="perm-group-chk" data-group-index="' + gIdx + '" ' + (allChecked ? 'checked' : '') + ' onchange="ROLES_CLIENT.toggleGroupPerms(' + gIdx + ', this.checked)">' : '') +
+              '<label for="chk-group-' + gIdx + '" style="font-weight: 600; font-size: 14px; color: var(--text-main); cursor: pointer; margin: 0;">' + self.escapeHtml(group.module) + '</label>' +
+              '<span class="perm-item-badge ' + tabBadgeClass + '">' + tabBadgeText + '</span>' +
+            '</div>' +
+            '<span class="badge-counter" id="badge-group-' + gIdx + '" style="font-size: 11px;">' + perms.length + ' quyền</span>' +
+          '</div>' +
+
+          // Grid các quyền trong module
+          '<div style="padding: 14px 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;">';
+
+        perms.forEach(function(p) {
+          var isChecked = isAdmin || !!self.assignedPermSet[p.id];
+          var disabledAttr = isAdmin ? 'disabled' : '';
+
+          html += '<div class="perm-item" style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: ' + (isChecked ? '#f8fafc' : '#fff') + '; transition: all 0.2s ease;">' +
+            '<input type="checkbox" id="chk-perm-' + p.id + '" class="perm-chk perm-chk-group-' + gIdx + '" data-perm-id="' + p.id + '" ' + (isChecked ? 'checked' : '') + ' ' + disabledAttr + ' onchange="ROLES_CLIENT.handlePermChange(this, ' + gIdx + ')">' +
+            '<div style="flex: 1;">' +
+              '<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">' +
+                '<label for="chk-perm-' + p.id + '" style="font-weight: 600; font-size: 13px; color: var(--text-main); cursor: ' + (isAdmin ? 'default' : 'pointer') + '; margin: 0;">' + self.escapeHtml(p.name) + '</label>' +
+              '</div>' +
+              '<div style="font-size: 11px; color: #6366f1; font-family: monospace; margin-bottom: 4px;">' + self.escapeHtml(p.code) + '</div>' +
+              '<div style="font-size: 11px; color: var(--text-muted); line-height: 1.3;">' + self.escapeHtml(p.description || "") + '</div>' +
+            '</div>' +
+          '</div>';
+        });
+
+        html += '</div></div>';
+      });
+
+      container.innerHTML = html;
+    },
+
+    /**
+     * Bật/Tắt toàn bộ quyền trong một nhóm module thuộc Tab hiện tại
+     */
+    toggleGroupPerms: function(groupIndex, isChecked) {
+      var self = this;
+      var checkboxes = document.querySelectorAll('.perm-chk-group-' + groupIndex);
+      checkboxes.forEach(function(cb) {
+        cb.checked = isChecked;
+        var pId = cb.getAttribute("data-perm-id");
+        if (pId) {
+          if (isChecked) {
+            self.assignedPermSet[pId] = true;
+          } else {
+            delete self.assignedPermSet[pId];
+          }
+        }
+        var parentCard = cb.closest(".perm-item");
+        if (parentCard) {
+          parentCard.style.background = isChecked ? "#f8fafc" : "#fff";
+        }
+      });
+      this.updateSelectedCounts();
+    },
+
+    /**
+     * Bắt sự kiện thay đổi của từng checkbox quyền
+     */
+    handlePermChange: function(checkbox, groupIndex) {
+      var pId = checkbox.getAttribute("data-perm-id");
+      if (pId) {
+        if (checkbox.checked) {
+          this.assignedPermSet[pId] = true;
+        } else {
+          delete this.assignedPermSet[pId];
+        }
+      }
+
+      var parentCard = checkbox.closest(".perm-item");
+      if (parentCard) {
+        parentCard.style.background = checkbox.checked ? "#f8fafc" : "#fff";
+      }
+
+      // Cập nhật checkbox tổng của nhóm
+      var groupChk = document.getElementById("chk-group-" + groupIndex);
+      if (groupChk) {
+        var siblings = document.querySelectorAll('.perm-chk-group-' + groupIndex);
+        var allChecked = Array.prototype.every.call(siblings, function(cb) { return cb.checked; });
+        groupChk.checked = allChecked;
+      }
+
+      this.updateSelectedCounts();
+    },
+
+    /**
+     * Chọn tất cả quyền của Tab hiện tại (Menu hoặc Thao tác)
+     */
+    selectCurrentTabPerms: function() {
+      var self = this;
+      var groups = (this.activePermTab === "MENU") ? this.menuGroups : this.actionGroups;
+      (groups || []).forEach(function(g) {
+        (g.permissions || []).forEach(function(p) {
+          self.assignedPermSet[p.id] = true;
+        });
+      });
+
+      this.renderCurrentTabMatrix();
+      this.updateSelectedCounts();
+    },
+
+    /**
+     * Bỏ chọn tất cả quyền của Tab hiện tại (Menu hoặc Thao tác)
+     */
+    deselectCurrentTabPerms: function() {
+      var self = this;
+      var groups = (this.activePermTab === "MENU") ? this.menuGroups : this.actionGroups;
+      (groups || []).forEach(function(g) {
+        (g.permissions || []).forEach(function(p) {
+          delete self.assignedPermSet[p.id];
+        });
+      });
+
+      this.renderCurrentTabMatrix();
+      this.updateSelectedCounts();
+    },
+
+    /**
+     * Chọn tất cả các quyền trong toàn bộ hệ thống (cả 2 tầng: 60 quyền)
+     */
+    selectAllPerms: function() {
+      var self = this;
+      (this.menuGroups || []).forEach(function(g) {
+        (g.permissions || []).forEach(function(p) {
+          self.assignedPermSet[p.id] = true;
+        });
+      });
+      (this.actionGroups || []).forEach(function(g) {
+        (g.permissions || []).forEach(function(p) {
+          self.assignedPermSet[p.id] = true;
+        });
+      });
+
+      this.renderCurrentTabMatrix();
+      this.updateSelectedCounts();
+    },
+
+    /**
+     * Bỏ chọn tất cả các quyền của cả 2 tầng
+     */
+    deselectAllPerms: function() {
+      this.assignedPermSet = {};
+      this.renderCurrentTabMatrix();
+      this.updateSelectedCounts();
+    },
+
+    /**
+     * Cập nhật số lượng quyền đã chọn lên toolbar và các badge trên từng tab
+     */
+    updateSelectedCounts: function() {
+      var self = this;
+      var totalMenu = 0;
+      var selectedMenu = 0;
+      (this.menuGroups || []).forEach(function(g) {
+        (g.permissions || []).forEach(function(p) {
+          totalMenu++;
+          if (self.assignedPermSet[p.id]) selectedMenu++;
+        });
+      });
+
+      var totalAction = 0;
+      var selectedAction = 0;
+      (this.actionGroups || []).forEach(function(g) {
+        (g.permissions || []).forEach(function(p) {
+          totalAction++;
+          if (self.assignedPermSet[p.id]) selectedAction++;
+        });
+      });
+
+      var totalAll = totalMenu + totalAction;
+      var selectedAll = selectedMenu + selectedAction;
+
+      var badgeMenu = document.getElementById("perm-tab-badge-menu");
+      var badgeAction = document.getElementById("perm-tab-badge-action");
+      var countEl = document.getElementById("perm-selected-count");
+
+      if (badgeMenu) badgeMenu.textContent = selectedMenu + " / " + totalMenu;
+      if (badgeAction) badgeAction.textContent = selectedAction + " / " + totalAction;
+      if (countEl) {
+        countEl.textContent = "Đã chọn: " + selectedAll + " / " + totalAll + " quyền (" + selectedMenu + " Menu, " + selectedAction + " Thao tác)";
+      }
+    },
+
+    /**
+     * Đóng Modal Phân quyền
+     */
+    closePermissionModal: function() {
+      var modal = document.getElementById("modal-role-permissions");
+      if (modal) modal.classList.remove("open");
+      this.currentRoleId = null;
+      this.currentRoleData = null;
+      this.assignedPermSet = {};
+    },
+
+    /**
+     * Gửi yêu cầu lưu cấu hình phân quyền 2 tầng lên máy chủ
+     */
+    submitSavePermissions: function() {
+      var self = this;
+      var token = this.getToken();
+      if (!token || !this.currentRoleId) return;
+
+      var submitBtn = document.getElementById("btn-submit-role-perms");
+      var btnText = document.getElementById("btn-save-perms-text");
+      if (submitBtn) submitBtn.disabled = true;
+      if (btnText) btnText.textContent = "Đang lưu...";
+
+      // Trích xuất danh sách permission_ids từ assignedPermSet
+      var permissionIds = Object.keys(this.assignedPermSet).filter(function(id) {
+        return !!self.assignedPermSet[id];
+      });
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (submitBtn) submitBtn.disabled = false;
+          if (btnText) btnText.textContent = "Lưu phân quyền";
+
+          if (typeof response === "string") {
+            try { response = JSON.parse(response); } catch (e) {}
+          }
+
+          if (response && response.success) {
+            APP.showToast(response.message || "Cập nhật phân quyền 2 tầng thành công!", "success");
+            self.closePermissionModal();
+            self.loadRoles();
+
+            // Nếu người dùng hiện tại có vai trò vừa cập nhật, làm mới phiên ngầm
+            APP.getSession();
+          } else {
+            APP.showToast((response && response.message) ? response.message : "Không thể lưu phân quyền.", "error");
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (submitBtn) submitBtn.disabled = false;
+          if (btnText) btnText.textContent = "Lưu phân quyền";
+          APP.showToast("Lỗi máy chủ: " + (err ? err.message : String(err)), "error");
+        })
+        .apiSaveRolePermissions(token, this.currentRoleId, permissionIds);
+    },
+
+    /**
+     * Mở Modal Thêm mới Vai trò
+     */
+    openCreateModal: function() {
+      var modal = document.getElementById("modal-role-form");
+      var titleEl = document.getElementById("modal-role-form-title");
+      var form = document.getElementById("form-role");
+      var idInput = document.getElementById("role-form-id");
+      var codeInput = document.getElementById("role-form-code");
+      var nameInput = document.getElementById("role-form-name");
+      var descInput = document.getElementById("role-form-desc");
+
+      if (form) form.reset();
+      if (idInput) idInput.value = "";
+      if (codeInput) {
+        codeInput.value = "";
+        codeInput.disabled = false;
+      }
+      if (titleEl) titleEl.textContent = "Thêm vai trò mới";
+      if (modal) modal.classList.add("open");
+    },
+
+    /**
+     * Mở Modal Chỉnh sửa Vai trò
+     */
+    openEditModal: function(roleId) {
+      var role = this.roles.find(function(r) { return r.id === roleId; });
+      if (!role) return;
+
+      var modal = document.getElementById("modal-role-form");
+      var titleEl = document.getElementById("modal-role-form-title");
+      var idInput = document.getElementById("role-form-id");
+      var codeInput = document.getElementById("role-form-code");
+      var nameInput = document.getElementById("role-form-name");
+      var descInput = document.getElementById("role-form-desc");
+
+      if (idInput) idInput.value = role.id;
+      if (codeInput) {
+        codeInput.value = role.code;
+        codeInput.disabled = true; // Không cho sửa mã vai trò đã tồn tại
+      }
+      if (nameInput) nameInput.value = role.name;
+      if (descInput) descInput.value = role.description || "";
+
+      if (titleEl) titleEl.textContent = "Chỉnh sửa Vai trò: " + role.name;
+      if (modal) modal.classList.add("open");
+    },
+
+    /**
+     * Đóng Modal Thêm/Sửa Vai trò
+     */
+    closeRoleModal: function() {
+      var modal = document.getElementById("modal-role-form");
+      if (modal) modal.classList.remove("open");
+    },
+
+    /**
+     * Gửi biểu mẫu Thêm/Sửa vai trò
+     */
+    submitRoleForm: function(event) {
+      if (event) event.preventDefault();
+      var self = this;
+      var token = this.getToken();
+      if (!token) return;
+
+      var idInput = document.getElementById("role-form-id");
+      var codeInput = document.getElementById("role-form-code");
+      var nameInput = document.getElementById("role-form-name");
+      var descInput = document.getElementById("role-form-desc");
+      var submitBtn = document.getElementById("btn-submit-role");
+      var btnText = document.getElementById("btn-role-submit-text");
+
+      var roleId = idInput ? idInput.value.trim() : "";
+      var code = codeInput ? codeInput.value.trim() : "";
+      var name = nameInput ? nameInput.value.trim() : "";
+      var desc = descInput ? descInput.value.trim() : "";
+
+      if (!name) {
+        APP.showToast("Vui lòng nhập tên vai trò.", "error");
+        return;
+      }
+
+      if (submitBtn) submitBtn.disabled = true;
+      if (btnText) btnText.textContent = "Đang lưu...";
+
+      var payload = {
+        id: roleId,
+        code: code,
+        name: name,
+        description: desc
+      };
+
+      var handler = function(response) {
+        if (submitBtn) submitBtn.disabled = false;
+        if (btnText) btnText.textContent = "Lưu vai trò";
+
+        if (typeof response === "string") {
+          try { response = JSON.parse(response); } catch (e) {}
+        }
+
+        if (response && response.success) {
+          APP.showToast(response.message || "Lưu vai trò thành công!", "success");
+          self.closeRoleModal();
+          self.loadRoles();
+        } else {
+          APP.showToast((response && response.message) ? response.message : "Thao tác thất bại.", "error");
+        }
+      };
+
+      var failureHandler = function(err) {
+        if (submitBtn) submitBtn.disabled = false;
+        if (btnText) btnText.textContent = "Lưu vai trò";
+        APP.showToast("Lỗi máy chủ: " + (err ? err.message : String(err)), "error");
+      };
+
+      if (roleId) {
+        google.script.run.withSuccessHandler(handler).withFailureHandler(failureHandler).apiUpdateRole(token, payload);
+      } else {
+        if (!code) {
+          APP.showToast("Vui lòng nhập mã vai trò.", "error");
+          if (submitBtn) submitBtn.disabled = false;
+          if (btnText) btnText.textContent = "Lưu vai trò";
+          return;
+        }
+        google.script.run.withSuccessHandler(handler).withFailureHandler(failureHandler).apiCreateRole(token, payload);
+      }
+    },
+
+    /**
+     * Khóa / Mở khóa vai trò
+     */
+    toggleRoleStatus: function(roleId) {
+      var self = this;
+      var token = this.getToken();
+      if (!token) return;
+
+      var role = this.roles.find(function(r) { return r.id === roleId; });
+      var actionName = (role && role.status === "ACTIVE") ? "khóa" : "kích hoạt";
+
+      APP.showToast("Đang " + actionName + " vai trò '" + (role ? role.name : roleId) + "'...", "info", 2000);
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (typeof response === "string") {
+            try { response = JSON.parse(response); } catch (e) {}
+          }
+          if (response && response.success) {
+            APP.showToast(response.message || "Cập nhật trạng thái thành công!", "success");
+            self.loadRoles();
+          } else {
+            APP.showToast((response && response.message) ? response.message : "Thao tác thất bại.", "error");
+          }
+        })
+        .withFailureHandler(function(err) {
+          APP.showToast("Lỗi: " + (err ? err.message : String(err)), "error");
+        })
+        .apiToggleRoleStatus(token, roleId);
+    },
+
+    /**
+     * Escape chuỗi HTML chống XSS
+     */
+    escapeHtml: function(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+  };
+</script>

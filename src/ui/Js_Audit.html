@@ -1,0 +1,504 @@
+<script>
+/**
+ * Js_Audit.html
+ * Điều khiển giao diện và tương tác cho phân hệ Nhật ký Hệ thống & Kiểm toán (Audit Log).
+ * Dự án: Base AppScript Framework
+ */
+
+var AUDIT_CLIENT = {
+  state: {
+    isLoading: false,
+    isLoaded: false,
+    logs: [],
+    pagination: {
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      totalPages: 1
+    },
+    filters: {
+      keyword: "",
+      action: "ALL",
+      entityType: "ALL",
+      startDate: "",
+      endDate: ""
+    },
+    stats: {
+      total: 0,
+      authCount: 0,
+      userCount: 0,
+      roleCount: 0,
+      settingsCount: 0
+    },
+    currentDetail: null
+  },
+
+  /**
+   * Khởi tạo phân hệ Audit Log khi truy cập
+   */
+  init: function() {
+    if (!this.state.isLoaded) {
+      this.bindEvents();
+      this.loadLogs(1, 10);
+    }
+  },
+
+  /**
+   * Gắn các sự kiện cho form lọc dữ liệu
+   */
+  bindEvents: function() {
+    var self = this;
+
+    var searchInput = document.getElementById("audit-filter-keyword");
+    if (searchInput) {
+      var searchTimeout = null;
+      searchInput.addEventListener("input", function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(function() {
+          self.applyFilters();
+        }, 350);
+      });
+      searchInput.addEventListener("keypress", function(e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          clearTimeout(searchTimeout);
+          self.applyFilters();
+        }
+      });
+    }
+
+    var actionSelect = document.getElementById("audit-filter-action");
+    if (actionSelect) {
+      actionSelect.addEventListener("change", function() {
+        self.applyFilters();
+      });
+    }
+
+    var entitySelect = document.getElementById("audit-filter-entity");
+    if (entitySelect) {
+      entitySelect.addEventListener("change", function() {
+        self.applyFilters();
+      });
+    }
+
+    var startInput = document.getElementById("audit-filter-start-date");
+    if (startInput) {
+      startInput.addEventListener("change", function() {
+        self.applyFilters();
+      });
+    }
+
+    var endInput = document.getElementById("audit-filter-end-date");
+    if (endInput) {
+      endInput.addEventListener("change", function() {
+        self.applyFilters();
+      });
+    }
+
+    window.addEventListener("resize", function() {
+      self.handleResponsiveView();
+    });
+  },
+
+  /**
+   * Áp dụng bộ lọc và tải lại trang 1
+   */
+  applyFilters: function() {
+    var kw = document.getElementById("audit-filter-keyword");
+    var act = document.getElementById("audit-filter-action");
+    var ent = document.getElementById("audit-filter-entity");
+    var startD = document.getElementById("audit-filter-start-date");
+    var endD = document.getElementById("audit-filter-end-date");
+
+    this.state.filters = {
+      keyword: kw ? kw.value.trim() : "",
+      action: act ? act.value : "ALL",
+      entityType: ent ? ent.value : "ALL",
+      startDate: startD ? startD.value : "",
+      endDate: endD ? endD.value : ""
+    };
+
+    this.loadLogs(1, this.state.pagination.pageSize || 10);
+  },
+
+  /**
+   * Đặt lại bộ lọc về mặc định
+   */
+  resetFilters: function() {
+    var kw = document.getElementById("audit-filter-keyword");
+    var act = document.getElementById("audit-filter-action");
+    var ent = document.getElementById("audit-filter-entity");
+    var startD = document.getElementById("audit-filter-start-date");
+    var endD = document.getElementById("audit-filter-end-date");
+
+    if (kw) kw.value = "";
+    if (act) act.value = "ALL";
+    if (ent) ent.value = "ALL";
+    if (startD) startD.value = "";
+    if (endD) endD.value = "";
+
+    this.state.filters = {
+      keyword: "",
+      action: "ALL",
+      entityType: "ALL",
+      startDate: "",
+      endDate: ""
+    };
+
+    this.loadLogs(1, 10);
+  },
+
+  /**
+   * Tải danh sách Audit Log từ máy chủ qua RPC
+   */
+  loadLogs: function(page, pageSize) {
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || localStorage.getItem("sp_token");
+    if (!token) {
+      if (typeof APP !== "undefined" && APP.showToast) {
+        APP.showToast("Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.", "error");
+      }
+      return;
+    }
+
+    page = page || self.state.pagination.page || 1;
+    pageSize = pageSize || self.state.pagination.pageSize || 10;
+
+    self.setLoadingState(true);
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        self.setLoadingState(false);
+        if (!response || !response.success) {
+          var errMsg = (response && response.message) || "Không thể tải dữ liệu nhật ký hệ thống.";
+          if (typeof APP !== "undefined" && APP.showToast) {
+            APP.showToast(errMsg, "error");
+          }
+          return;
+        }
+
+        var data = response.data || {};
+        self.state.logs = data.logs || [];
+        self.state.pagination = data.pagination || { page: page, pageSize: pageSize, total: 0, totalPages: 1 };
+        self.state.stats = data.stats || { total: 0, authCount: 0, userCount: 0, roleCount: 0, settingsCount: 0 };
+        self.state.isLoaded = true;
+
+        self.renderTable(self.state.logs);
+        self.updateStatsDisplay(self.state.stats);
+
+        // Render phân trang dùng chung APP.renderPagination
+        if (typeof APP !== "undefined" && APP.renderPagination) {
+          APP.renderPagination("audit-pagination", self.state.pagination, function(newPage, newSize) {
+            self.loadLogs(newPage, newSize);
+          });
+        }
+      })
+      .withFailureHandler(function(err) {
+        self.setLoadingState(false);
+        var errText = (err && err.message) || "Lỗi kết nối máy chủ Google Apps Script.";
+        if (typeof APP !== "undefined" && APP.showToast) {
+          APP.showToast(errText, "error");
+        }
+      })
+      .apiGetAuditLogs(token, self.state.filters, page, pageSize);
+  },
+
+  /**
+   * Cập nhật số liệu thống kê nhanh trên thanh công cụ
+   */
+  updateStatsDisplay: function(stats) {
+    var totalEl = document.getElementById("audit-stat-total");
+    if (totalEl) {
+      var total = (stats && stats.total) ? stats.total : 0;
+      totalEl.textContent = total + " sự kiện";
+    }
+  },
+
+  /**
+   * Điều khiển hiển thị bảng dữ liệu (hỗ trợ thanh cuộn ngang trên cả Desktop và Mobile)
+   */
+  handleResponsiveView: function() {
+    var tableWrapper = document.getElementById("audit-table-wrapper");
+    var mobileList = document.getElementById("audit-mobile-list");
+    if (tableWrapper) tableWrapper.style.display = "block";
+    if (mobileList) mobileList.style.display = "none";
+  },
+
+  /**
+   * Render danh sách logs ra bảng dữ liệu và mobile view
+   */
+  renderTable: function(logs) {
+    var tbody = document.getElementById("audit-table-body");
+    var mobileList = document.getElementById("audit-mobile-list");
+    var emptyEl = document.getElementById("audit-empty-state");
+
+    if (!logs || logs.length === 0) {
+      if (tbody) tbody.innerHTML = "";
+      if (mobileList) mobileList.innerHTML = "";
+      if (emptyEl) emptyEl.style.display = "block";
+      var pagWrapper = document.getElementById("audit-pagination");
+      if (pagWrapper) pagWrapper.style.display = "none";
+      return;
+    }
+
+    if (emptyEl) emptyEl.style.display = "none";
+    var pagWrapper = document.getElementById("audit-pagination");
+    if (pagWrapper) pagWrapper.style.display = "flex";
+
+    // 1. Render Desktop Table Rows
+    if (tbody) {
+      var html = "";
+      logs.forEach(function(item) {
+        var actionBadge = AUDIT_CLIENT.formatActionBadge(item.action);
+        var timeStr = AUDIT_CLIENT.formatDateTime(item.event_at);
+        var actorName = item.actor_name_snapshot || item.actor_username_snapshot || "Hệ thống";
+        var actorRole = item.actor_role_snapshot || "";
+        var actorInitial = (actorName.charAt(0) || "U").toUpperCase();
+        var charCode = actorName.charCodeAt(0) || 65;
+        var altIdx = (charCode % 5) + 1;
+
+        html += 
+          '<tr>' +
+            '<td style="white-space: nowrap; font-size: 12px; color: #475569; font-weight: 500;">' +
+              '<div style="display: flex; align-items: center; gap: 6px;">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>' +
+                '<span>' + timeStr + '</span>' +
+              '</div>' +
+            '</td>' +
+            '<td>' +
+              '<div style="display: flex; align-items: center; gap: 10px;">' +
+                '<div class="user-avatar-circle avatar-alt-' + altIdx + '" style="width: 32px; height: 32px; font-size: 12px; flex-shrink: 0;">' + actorInitial + '</div>' +
+                '<div>' +
+                  '<div style="font-weight: 600; font-size: 13px; color: var(--text-main);">' + AUDIT_CLIENT.escapeHtml(actorName) + '</div>' +
+                  (actorRole ? '<span style="font-size: 11px; color: var(--text-muted);">' + AUDIT_CLIENT.escapeHtml(actorRole) + '</span>' : '') +
+                '</div>' +
+              '</div>' +
+            '</td>' +
+            '<td>' + actionBadge + '</td>' +
+            '<td>' +
+              '<span class="badge-entity">' + AUDIT_CLIENT.escapeHtml(item.entity_type || "SYSTEM") + '</span>' +
+              (item.entity_number_snapshot ? '<div style="font-size: 11px; color: #64748b; margin-top: 2px;">#' + AUDIT_CLIENT.escapeHtml(item.entity_number_snapshot) + '</div>' : '') +
+            '</td>' +
+            '<td style="max-width: 320px;">' +
+              '<div class="audit-msg-cell" title="' + AUDIT_CLIENT.escapeHtml(item.message_snapshot || "") + '">' +
+                AUDIT_CLIENT.escapeHtml(item.message_snapshot || "—") +
+              '</div>' +
+            '</td>' +
+            '<td style="text-align: right; white-space: nowrap;">' +
+              '<button type="button" class="btn btn-secondary btn-sm" onclick="AUDIT_CLIENT.viewDetail(\'' + item.id + '\')" title="Xem chi tiết dữ liệu snapshot">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>' +
+                '<span>Chi tiết</span>' +
+              '</button>' +
+            '</td>' +
+          '</tr>';
+      });
+      tbody.innerHTML = html;
+    }
+
+    // 2. Render Mobile Cards View
+    if (mobileList) {
+      var mobHtml = "";
+      logs.forEach(function(item) {
+        var actionBadge = AUDIT_CLIENT.formatActionBadge(item.action);
+        var timeStr = AUDIT_CLIENT.formatDateTime(item.event_at);
+        var actorName = item.actor_name_snapshot || item.actor_username_snapshot || "Hệ thống";
+
+        mobHtml +=
+          '<div class="audit-card-mobile">' +
+            '<div class="audit-card-mobile-header">' +
+              '<div style="display: flex; align-items: center; gap: 8px;">' +
+                actionBadge +
+                '<span class="badge-entity">' + AUDIT_CLIENT.escapeHtml(item.entity_type || "SYSTEM") + '</span>' +
+              '</div>' +
+              '<span style="font-size: 11px; color: #64748b;">' + timeStr + '</span>' +
+            '</div>' +
+            '<div class="audit-card-mobile-body">' +
+              '<div style="font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 4px;">' +
+                AUDIT_CLIENT.escapeHtml(item.message_snapshot || "Không có thông điệp") +
+              '</div>' +
+              '<div style="font-size: 12px; color: var(--text-muted);">' +
+                'Thực hiện bởi: <strong>' + AUDIT_CLIENT.escapeHtml(actorName) + '</strong> (' + AUDIT_CLIENT.escapeHtml(item.actor_role_snapshot || "Nhân viên") + ')' +
+              '</div>' +
+            '</div>' +
+            '<div class="audit-card-mobile-footer">' +
+              '<button type="button" class="btn btn-secondary btn-sm" onclick="AUDIT_CLIENT.viewDetail(\'' + item.id + '\')">' +
+                '<span>Xem chi tiết snapshot</span>' +
+              '</button>' +
+            '</div>' +
+          '</div>';
+      });
+      mobileList.innerHTML = mobHtml;
+    }
+
+    // Đảm bảo chỉ hiển thị view phù hợp với kích thước màn hình
+    this.handleResponsiveView();
+  },
+
+  /**
+   * Mở modal xem chi tiết bản ghi Audit Log
+   */
+  viewDetail: function(logId) {
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || localStorage.getItem("sp_token");
+    if (!token) return;
+
+    var modal = document.getElementById("modal-audit-detail");
+    if (!modal) return;
+
+    var contentEl = document.getElementById("audit-detail-content");
+    if (contentEl) {
+      contentEl.innerHTML = '<div style="text-align: center; padding: 40px 0;"><div class="spinner"></div><p style="margin-top: 10px; font-size: 13px; color: var(--text-muted);">Đang tải chi tiết bản ghi...</p></div>';
+    }
+    modal.classList.add("open");
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (!response || !response.success || !response.data) {
+          if (contentEl) contentEl.innerHTML = '<p style="color: var(--error); padding: 20px;">' + ((response && response.message) || "Không tìm thấy chi tiết bản ghi.") + '</p>';
+          return;
+        }
+
+        var data = response.data;
+        var log = data.log;
+        var beforeJson = data.before_parsed;
+        var afterJson = data.after_parsed;
+
+        self.renderDetailModal(log, beforeJson, afterJson);
+      })
+      .withFailureHandler(function(err) {
+        if (contentEl) contentEl.innerHTML = '<p style="color: var(--error); padding: 20px;">Lỗi kết nối máy chủ: ' + (err.message || "") + '</p>';
+      })
+      .apiGetAuditLogDetail(token, logId);
+  },
+
+  /**
+   * Render nội dung chi tiết snapshot vào modal
+   */
+  renderDetailModal: function(log, beforeObj, afterObj) {
+    var contentEl = document.getElementById("audit-detail-content");
+    if (!contentEl) return;
+
+    var timeStr = this.formatDateTime(log.event_at);
+    var actionBadge = this.formatActionBadge(log.action);
+    var actorName = log.actor_name_snapshot || log.actor_username_snapshot || "Hệ thống";
+
+    var beforeFormatted = beforeObj ? JSON.stringify(beforeObj, null, 2) : "Không có dữ liệu trước thay đổi";
+    var afterFormatted = afterObj ? JSON.stringify(afterObj, null, 2) : "Không có dữ liệu sau thay đổi";
+
+    var html = 
+      '<div class="audit-detail-grid">' +
+        '<div class="audit-detail-meta-card">' +
+          '<div class="audit-detail-meta-item">' +
+            '<span class="meta-label">Mã bản ghi</span>' +
+            '<span class="meta-val"><code>' + log.id + '</code></span>' +
+          '</div>' +
+          '<div class="audit-detail-meta-item">' +
+            '<span class="meta-label">Thời gian phát sinh</span>' +
+            '<span class="meta-val">' + timeStr + '</span>' +
+          '</div>' +
+          '<div class="audit-detail-meta-item">' +
+            '<span class="meta-label">Hành động</span>' +
+            '<span class="meta-val">' + actionBadge + '</span>' +
+          '</div>' +
+          '<div class="audit-detail-meta-item">' +
+            '<span class="meta-label">Thực thể tác động</span>' +
+            '<span class="meta-val"><strong>' + (log.entity_type || "N/A") + '</strong> (ID: ' + (log.entity_id || "N/A") + ')</span>' +
+          '</div>' +
+          '<div class="audit-detail-meta-item">' +
+            '<span class="meta-label">Người thực hiện</span>' +
+            '<span class="meta-val"><strong>' + this.escapeHtml(actorName) + '</strong> (' + this.escapeHtml(log.actor_role_snapshot || "Nhân viên") + ')</span>' +
+          '</div>' +
+          '<div class="audit-detail-meta-item" style="grid-column: span 2;">' +
+            '<span class="meta-label">Thông điệp ghi nhận</span>' +
+            '<span class="meta-val" style="color: var(--text-main); font-weight: 500;">' + this.escapeHtml(log.message_snapshot || "—") + '</span>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="audit-json-comparison">' +
+          '<div class="audit-json-box">' +
+            '<div class="audit-json-title">Dữ liệu trước (Before JSON)</div>' +
+            '<pre class="json-code-view">' + this.escapeHtml(beforeFormatted) + '</pre>' +
+          '</div>' +
+          '<div class="audit-json-box">' +
+            '<div class="audit-json-title">Dữ liệu sau (After JSON)</div>' +
+            '<pre class="json-code-view json-code-after">' + this.escapeHtml(afterFormatted) + '</pre>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    contentEl.innerHTML = html;
+  },
+
+  /**
+   * Đóng modal chi tiết
+   */
+  closeDetailModal: function() {
+    var modal = document.getElementById("modal-audit-detail");
+    if (modal) modal.classList.remove("open");
+  },
+
+  /**
+   * Bật tắt trạng thái tải dữ liệu
+   */
+  setLoadingState: function(loading) {
+    this.state.isLoading = loading;
+    if (!loading && typeof APP !== "undefined" && APP.stopPageLoading) {
+      APP.stopPageLoading();
+    }
+    var overlay = document.getElementById("audit-loading-overlay");
+    if (overlay) overlay.style.display = loading ? "flex" : "none";
+    var reloadBtn = document.getElementById("btn-audit-reload");
+    if (reloadBtn) reloadBtn.disabled = loading;
+  },
+
+  /**
+   * Format Action Badge màu sắc theo nhóm hành động
+   */
+  formatActionBadge: function(action) {
+    action = String(action || "UNKNOWN").toUpperCase();
+    var cls = "badge-action-default";
+
+    if (action.indexOf("LOGIN") !== -1 || action.indexOf("LOGOUT") !== -1) {
+      cls = "badge-action-auth";
+    } else if (action.indexOf("CREATE") !== -1 || action.indexOf("ADD") !== -1) {
+      cls = "badge-action-create";
+    } else if (action.indexOf("UPDATE") !== -1 || action.indexOf("EDIT") !== -1 || action.indexOf("RESET") !== -1) {
+      cls = "badge-action-update";
+    } else if (action.indexOf("LOCK") !== -1 || action.indexOf("DELETE") !== -1) {
+      cls = "badge-action-delete";
+    } else if (action.indexOf("CACHE") !== -1 || action.indexOf("SETTINGS") !== -1 || action.indexOf("PERM") !== -1) {
+      cls = "badge-action-system";
+    }
+
+    return '<span class="badge-action ' + cls + '">' + this.escapeHtml(action) + '</span>';
+  },
+
+  /**
+   * Format ngày giờ hiển thị
+   */
+  formatDateTime: function(dtStr) {
+    if (!dtStr) return "—";
+    try {
+      var d = new Date(dtStr);
+      if (isNaN(d.getTime())) return dtStr;
+      var pad = function(n) { return n < 10 ? "0" + n : n; };
+      return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    } catch(e) {
+      return dtStr;
+    }
+  },
+
+  /**
+   * Escape HTML an toàn
+   */
+  escapeHtml: function(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+};
+</script>

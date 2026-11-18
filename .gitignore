@@ -1,0 +1,12 @@
+# Dependency directories
+node_modules/
+package-lock.json
+
+# Clasp credentials
+.clasprc.json
+
+# Always preserve clasp project binding
+!.clasp.json
+
+*.log
+.DS_Store

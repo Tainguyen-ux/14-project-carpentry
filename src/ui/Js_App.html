@@ -1,0 +1,1142 @@
+<script>
+  /**
+   * Js_App.html
+   * Điều phối trạng thái toàn cục ứng dụng client, Session, Sidebar Navigation, View, Toast.
+   * Dự án: Base AppScript Framework
+   */
+
+  // Ghi đè window.alert toàn cục: Tuyệt đối không dùng alert mặc định của trình duyệt, luôn dùng Toast Popup
+  window.alert = function(msg) {
+    if (typeof APP !== "undefined" && APP && APP.showToast) {
+      APP.showToast(String(msg || ""), "warning", 4500);
+    } else {
+      console.warn("[Intercepted window.alert]:", msg);
+    }
+  };
+  window.confirm = function(msg) {
+    console.warn("[Intercepted window.confirm]:", msg);
+    if (typeof APP !== "undefined" && APP && APP.showToast) {
+      APP.showToast(String(msg || ""), "info", 4500);
+    }
+    return true;
+  };
+  window.prompt = function(msg, defaultVal) {
+    console.warn("[Intercepted window.prompt]:", msg);
+    if (typeof APP !== "undefined" && APP && APP.showToast) {
+      APP.showToast(String(msg || ""), "warning", 4500);
+    }
+    return defaultVal || "";
+  };
+
+  var UTILS = window.UTILS || {
+    /**
+     * Thoát ký tự HTML an toàn chống XSS
+     * @param {*} str
+     * @returns {string}
+     */
+    escapeHtml: function(str) {
+      if (!str && str !== 0) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    },
+
+    /**
+     * Định dạng số theo chuẩn phân cách hàng nghìn vi-VN
+     * @param {number|string} num
+     * @returns {string}
+     */
+    formatNumber: function(num) {
+      return (Number(num) || 0).toLocaleString("vi-VN");
+    },
+
+    /**
+     * Định dạng tiền tệ VNĐ
+     * @param {number|string} num
+     * @returns {string}
+     */
+    formatCurrency: function(num) {
+      return (Number(num) || 0).toLocaleString("vi-VN") + " đ";
+    },
+
+    /**
+     * Tự động định dạng ô input tiền tệ theo phân cách hàng nghìn vi-VN khi người dùng nhập
+     * @param {HTMLInputElement} input
+     * @returns {number} Giá trị số thực
+     */
+    formatCurrencyInput: function(input) {
+      if (!input) return 0;
+      var raw = String(input.value || "").replace(/\D/g, "");
+      if (!raw) {
+        input.value = "";
+        return 0;
+      }
+      var num = parseInt(raw, 10) || 0;
+      input.value = num.toLocaleString("vi-VN");
+      return num;
+    },
+
+    /**
+     * Chuyển đổi chuỗi tiền tệ có dấu phân cách sang số nguyên
+     * @param {*} val
+     * @returns {number}
+     */
+    parseCurrency: function(val) {
+      if (!val && val !== 0) return 0;
+      var clean = String(val).replace(/\D/g, "");
+      return parseInt(clean, 10) || 0;
+    }
+  };
+  window.UTILS = UTILS;
+
+  // Client-side helper toàn cục bảo đảm token luôn sẵn sàng cho mọi phân hệ
+  window.AUTH = {
+    getToken: function() {
+      if (typeof APP !== "undefined" && APP.token) return APP.token;
+      if (typeof APP !== "undefined" && APP.currentUser && APP.currentUser.token) return APP.currentUser.token;
+      try {
+        var s = (typeof APP !== "undefined" && APP.getSession) ? APP.getSession() : null;
+        if (s && s.token) return s.token;
+        var raw = localStorage.getItem("BASE_APPSCRIPT_AUTH_SESSION") || sessionStorage.getItem("BASE_APPSCRIPT_AUTH_SESSION");
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (parsed && parsed.token) return parsed.token;
+        }
+      } catch (e) {}
+      return localStorage.getItem("sp_token") || "";
+    }
+  };
+
+  var APP = {
+    SESSION_STORAGE_KEY: "BASE_APPSCRIPT_AUTH_SESSION_" + (window.APP_CODE || "STARTER_APP"),
+    currentUser: null,
+    token: null,
+    currentModule: "dashboard",
+    modules: {},
+
+    /**
+     * Đăng ký động một Module Nghiệp vụ vào Router mà không cần sửa code Core
+     * @param {string} moduleCode Mã module (khớp data-module trên Sidebar)
+     * @param {Object} config { viewId, onInit, onReload }
+     */
+    registerModule: function(moduleCode, config) {
+      if (!moduleCode) return;
+      this.modules[moduleCode] = Object.assign({
+        viewId: "view-" + moduleCode,
+        onInit: null,
+        onReload: null
+      }, config || {});
+    },
+
+    /**
+     * Khởi tạo ứng dụng khi DOM tải xong
+     */
+    init: function() {
+      this.bindSidebarEvents();
+      this.bindButtonLoadingEvents();
+
+      var savedSession = this.getSession();
+      if (savedSession && savedSession.token) {
+        this.currentUser = savedSession;
+        this.token = savedSession.token;
+        this.updateUserUI(savedSession);
+        this.applyMenuPermissions(savedSession);
+        this.switchView("app");
+        this.navigateTo(this.currentModule || "dashboard");
+
+        // Kiểm tra tính hợp lệ của session ngầm với server
+        if (typeof google !== "undefined" && google.script && google.script.run) {
+          google.script.run
+            .withSuccessHandler(function(response) {
+              if (response && response.success) {
+                APP.currentUser = Object.assign(savedSession, response.data);
+                APP.updateUserUI(APP.currentUser);
+                APP.applyMenuPermissions(APP.currentUser);
+              } else {
+                APP.clearSession();
+                APP.switchView("auth");
+                APP.showToast("Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.", "info");
+              }
+            })
+            .withFailureHandler(function() {
+              // Bỏ qua nếu lỗi mạng tạm thời
+            })
+            .apiCheckSession(savedSession.token);
+        }
+      } else {
+        this.switchView("auth");
+      }
+    },
+
+    /**
+     * Gắn sự kiện cho Sidebar Navigation & Mobile Drawer
+     */
+        /**
+     * Tự động bắt sự kiện loading cho tất cả các nút chức năng và nút submit form
+     */
+    bindButtonLoadingEvents: function() {
+      var self = this;
+
+      // 1. Tự động gắn loading khi click các nút Làm mới, Tải lại hoặc nút có data-loading-text
+      document.addEventListener("click", function(e) {
+        var btn = e.target.closest("button");
+        if (!btn) return;
+
+        // Bỏ qua các nút đóng modal (✕, Đóng, Hủy), toggle sidebar, tab chuyển đổi
+        if (btn.classList.contains("modal-close-btn") || btn.id === "btn-sidebar-toggle" || btn.id === "btn-sidebar-close") {
+          return;
+        }
+
+        var text = (btn.textContent || "").trim();
+        if (text === "Làm mới" || text === "Tải lại" || text === "Làm mới báo cáo" || text === "Làm mới form") {
+          self.setButtonLoading(btn, true, "Đang tải...");
+        } else if (btn.getAttribute("data-loading-text")) {
+          self.setButtonLoading(btn, true, btn.getAttribute("data-loading-text"));
+        }
+      });
+
+      // 2. Tự động gắn loading khi submit bất kỳ Form nào trên hệ thống
+      document.addEventListener("submit", function(e) {
+        var form = e.target;
+        var submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) {
+          var loadTxt = submitBtn.getAttribute("data-loading-text") || "Đang lưu...";
+          self.setButtonLoading(submitBtn, true, loadTxt);
+        }
+      });
+    },
+
+bindSidebarEvents: function() {
+      var self = this;
+
+      // Nút mở sidebar trên mobile
+      var toggleBtn = document.getElementById("btn-sidebar-toggle");
+      if (toggleBtn) {
+        toggleBtn.addEventListener("click", function() {
+          self.openSidebar();
+        });
+      }
+
+      // Nút đóng sidebar trên mobile
+      var closeBtn = document.getElementById("btn-sidebar-close");
+      if (closeBtn) {
+        closeBtn.addEventListener("click", function() {
+          self.closeSidebar();
+        });
+      }
+
+      // Backdrop overlay đóng sidebar khi nhấp ra ngoài
+      var overlay = document.getElementById("sidebar-overlay");
+      if (overlay) {
+        overlay.addEventListener("click", function() {
+          self.closeSidebar();
+        });
+      }
+
+      // Đóng sidebar khi nhấn phím ESC
+      document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape") {
+          self.closeSidebar();
+        }
+      });
+
+      // Bắt sự kiện nhấp vào từng mục trong menu
+      var navItems = document.querySelectorAll(".nav-item");
+      navItems.forEach(function(item) {
+        item.addEventListener("click", function() {
+          self.handleNavClick(this);
+        });
+      });
+
+      // Tự động đóng backdrop khi người dùng xoay màn hình hoặc resize về desktop
+      window.addEventListener("resize", function() {
+        if (window.innerWidth > 992) {
+          self.closeSidebar();
+        }
+      });
+    },
+
+    /**
+     * Mở Sidebar Drawer (Mobile)
+     */
+    openSidebar: function() {
+      var sidebar = document.getElementById("app-sidebar");
+      var overlay = document.getElementById("sidebar-overlay");
+      if (sidebar) sidebar.classList.add("open");
+      if (overlay) overlay.classList.add("active");
+      if (window.innerWidth <= 992) {
+        document.body.style.overflow = "hidden";
+      }
+    },
+
+    /**
+     * Đóng Sidebar Drawer (Mobile)
+     */
+    closeSidebar: function() {
+      var sidebar = document.getElementById("app-sidebar");
+      var overlay = document.getElementById("sidebar-overlay");
+      if (sidebar) sidebar.classList.remove("open");
+      if (overlay) overlay.classList.remove("active");
+      document.body.style.overflow = "";
+    },
+
+    /**
+     * Điều hướng đến một module cụ thể bằng mã code
+     * @param {string} moduleCode 
+     */
+    navigateTo: function(moduleCode) {
+      var targetItem = document.querySelector('.nav-item[data-module="' + moduleCode + '"]');
+      if (targetItem) {
+        this.handleNavClick(targetItem);
+      }
+    },
+
+    /**
+     * Xử lý chuyển đổi View khi chọn menu
+     * @param {HTMLElement} itemEl 
+     */
+        /**
+     * Bật trạng thái đang tải dữ liệu của trang (Top bar + Loading indicator + Menu pulse)
+     * @param {string} moduleCode 
+     * @param {string} pageTitle 
+     */
+    startPageLoading: function(moduleCode, pageTitle) {
+      this.isLoadingPage = true;
+
+      // 1. Bật thanh tiến trình đỉnh trang (Top Progress Bar)
+      var progressBar = document.getElementById("app-global-progress-bar");
+      if (progressBar) {
+        progressBar.style.width = "";
+        progressBar.classList.add("indeterminate");
+        progressBar.classList.add("active");
+      }
+
+      // 2. Bật hộp thông báo đang tải dữ liệu
+      var loaderEl = document.getElementById("app-page-loader");
+      var titleEl = document.getElementById("page-loader-title");
+      var descEl = document.getElementById("page-loader-desc");
+
+      var descMap = {
+        "dashboard": "Đang tổng hợp số liệu thống kê thời gian thực...",
+        "users": "Đang tải danh sách tài khoản người dùng...",
+        "roles": "Đang tải danh sách vai trò và phân quyền...",
+        "menus": "Đang tải cấu trúc danh mục menu...",
+        "audit-log": "Đang tải nhật ký hệ thống...",
+        "settings": "Đang tải cấu hình tham số hệ thống...",
+        "customers": "Đang tải danh sách khách hàng và lịch sử công nợ...",
+        "leads": "Đang tải danh sách khách hàng tiềm năng & phễu Lead...",
+        "opportunities": "Đang tải danh sách cơ hội bán hàng & báo giá...",
+        "interactions": "Đang tải timeline lịch sử chăm sóc khách hàng...",
+        "tasks": "Đang tải danh sách công việc và lịch nhắc hẹn hôm nay...",
+        "orders": "Đang tải danh sách đơn hàng và trạng thái mới nhất...",
+        "create_order": "Đang tải biểu mẫu tạo đơn hàng mới...",
+        "products": "Đang kiểm tra tồn kho và bảng giá sản phẩm...",
+        "deliveries": "Đang tải danh sách phiếu giao và trạng thái vận chuyển...",
+        "payments": "Đang tải lịch sử thu tiền và theo dõi công nợ...",
+        "assets": "Đang tải danh bạ trang thiết bị & tài sản doanh nghiệp...",
+        "assignments": "Đang tải danh sách biên bản bàn giao tài sản...",
+        "transfers": "Đang tải danh sách phiếu điều chuyển thiết bị...",
+        "maintenance": "Đang tải lịch sử bảo trì và phiếu báo hỏng thiết bị...",
+        "repairs": "Đang tải danh sách phiếu sửa chữa và tiến độ kỹ thuật...",
+        "reception": "Đang khởi tạo biểu mẫu tiếp nhận máy tại quầy...",
+        "history": "Đang tra cứu lịch sử sửa chữa và tình trạng bảo hành...",
+        "trips": "Đang tải danh sách hồ sơ các chuyến công tác...",
+        "request": "Đang khởi tạo phiếu đề nghị công tác mới...",
+        "approvals": "Đang tải danh sách hồ sơ chờ phê duyệt & giải ngân tạm ứng...",
+        "settlements": "Đang tải bảng kê thanh quyết toán chi phí công tác...",
+        "reports": "Đang tổng hợp biểu đồ phân tích và báo cáo chi tiết..."
+      };
+
+      if (titleEl) {
+        titleEl.textContent = "Đang tải dữ liệu " + (pageTitle || "") + "...";
+      }
+      if (descEl) {
+        descEl.textContent = descMap[moduleCode] || "Vui lòng chờ hệ thống tải dữ liệu mới nhất...";
+      }
+      if (loaderEl) {
+        loaderEl.style.display = "flex";
+      }
+
+      // 3. Hiệu ứng nhịp loading trên menu đang chọn
+      document.querySelectorAll(".nav-item.is-nav-loading").forEach(function(el) {
+        el.classList.remove("is-nav-loading");
+      });
+      var activeNav = document.querySelector('.nav-item[data-module="' + moduleCode + '"]');
+      if (activeNav) activeNav.classList.add("is-nav-loading");
+
+      // 4. Cơ chế an toàn: Tự động tắt loading sau 7s để tránh treo nếu mất mạng
+      if (this._pageLoadingTimeout) {
+        clearTimeout(this._pageLoadingTimeout);
+      }
+      var self = this;
+      this._pageLoadingTimeout = setTimeout(function() {
+        self.stopPageLoading();
+      }, 7000);
+    },
+
+    /**
+     * Tắt trạng thái đang tải dữ liệu của trang
+     */
+    stopPageLoading: function() {
+      this.isLoadingPage = false;
+      if (this._pageLoadingTimeout) {
+        clearTimeout(this._pageLoadingTimeout);
+        this._pageLoadingTimeout = null;
+      }
+
+      // 1. Tắt Top Progress Bar với hiệu ứng mượt
+      var progressBar = document.getElementById("app-global-progress-bar");
+      if (progressBar) {
+        progressBar.classList.remove("indeterminate");
+        progressBar.style.width = "100%";
+        setTimeout(function() {
+          progressBar.classList.remove("active");
+          setTimeout(function() {
+            progressBar.style.width = "0%";
+          }, 350);
+        }, 200);
+      }
+
+      // 2. Ẩn hộp thông báo tải dữ liệu
+      var loaderEl = document.getElementById("app-page-loader");
+      if (loaderEl) {
+        loaderEl.style.display = "none";
+      }
+
+      // 3. Gỡ trạng thái loading trên menu
+      document.querySelectorAll(".nav-item.is-nav-loading").forEach(function(el) {
+        el.classList.remove("is-nav-loading");
+      });
+
+      // 4. Tự động khôi phục tất cả các nút chức năng đang ở trạng thái loading
+      document.querySelectorAll(".btn-loading, [data-original-html]").forEach(function(btn) {
+        APP.setButtonLoading(btn, false);
+      });
+    },
+
+handleNavClick: function(itemEl) {
+      if (!itemEl) return;
+
+      // 1. Kiểm tra quyền truy cập Menu (Tầng 1) của người dùng đối với chức năng này
+      var menuPerm = itemEl.getAttribute("data-menu-perm") || itemEl.getAttribute("data-permission");
+      if (menuPerm) {
+        var isAdmin = this.currentUser && (this.currentUser.is_admin || (this.currentUser.permissions && this.currentUser.permissions.indexOf("*") !== -1));
+        var menuPerms = (this.currentUser && (this.currentUser.menu_permissions || this.currentUser.permissions)) || [];
+        if (!isAdmin && menuPerms.indexOf("*") === -1 && menuPerms.indexOf(menuPerm) === -1) {
+          this.showToast("Bạn không có quyền truy cập menu này.", "warning");
+          return;
+        }
+      }
+
+      // Cập nhật trạng thái Active trên sidebar
+      document.querySelectorAll(".nav-item").forEach(function(el) {
+        el.classList.remove("active");
+      });
+      itemEl.classList.add("active");
+
+      // 2. Đọc dữ liệu từ dataset
+      var module = itemEl.getAttribute("data-module") || "dashboard";
+      var title = itemEl.getAttribute("data-title") || "Chức năng";
+      var group = itemEl.getAttribute("data-group") || "Hệ thống";
+      var desc = itemEl.getAttribute("data-desc") || ("Chức năng thuộc phân hệ " + group + " theo tài liệu SYSTEM_FUNCTIONS.");
+
+      this.currentModule = module;
+      this.startPageLoading(module, title);
+
+      // 3. Cập nhật Breadcrumb & Tiêu đề
+      var breadcrumbEl = document.getElementById("content-breadcrumb");
+      var titleEl = document.getElementById("content-title");
+
+      if (breadcrumbEl) {
+        breadcrumbEl.innerHTML = "<span>" + group + "</span><span class='breadcrumb-separator'>/</span><span>" + title + "</span>";
+      }
+      if (titleEl) {
+        titleEl.textContent = title;
+      }
+
+      // 4. Ẩn tất cả các content-view hiện có và điều phối mở View đích (hỗ trợ cả Core & Module Registry động)
+      document.querySelectorAll(".content-view").forEach(function(v) {
+        v.style.display = "none";
+      });
+
+      var placeholderView = document.getElementById("view-placeholder");
+      var registeredMod = this.modules[module];
+      var targetViewEl = document.getElementById((registeredMod && registeredMod.viewId) || ("view-" + module));
+
+            if (registeredMod && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof registeredMod.onInit === "function") {
+          registeredMod.onInit();
+        }
+      } else if (module === "orders" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof ORDERS_CLIENT !== "undefined" && ORDERS_CLIENT.init) ORDERS_CLIENT.init();
+      } else if (module === "customers" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof CUSTOMERS_CLIENT !== "undefined" && CUSTOMERS_CLIENT.init) CUSTOMERS_CLIENT.init();
+        else if (typeof CUSTOMER_CLIENT !== "undefined" && CUSTOMER_CLIENT.init) CUSTOMER_CLIENT.init();
+      } else if (module === "products" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof PRODUCTS_CLIENT !== "undefined" && PRODUCTS_CLIENT.init) PRODUCTS_CLIENT.init();
+      } else if (module === "deliveries" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof DELIVERIES_CLIENT !== "undefined" && DELIVERIES_CLIENT.init) DELIVERIES_CLIENT.init();
+      } else if (module === "payments" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof PAYMENTS_CLIENT !== "undefined" && PAYMENTS_CLIENT.init) PAYMENTS_CLIENT.init();
+      } else if (module === "reports" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof REPORTS_CLIENT !== "undefined" && REPORTS_CLIENT.init) REPORTS_CLIENT.init();
+        else if (typeof REPORT_CLIENT !== "undefined" && REPORT_CLIENT.init) REPORT_CLIENT.init();
+        else if (typeof REPORT_PAGE !== "undefined" && REPORT_PAGE.loadReports) REPORT_PAGE.loadReports();
+        else if (typeof REPAIR_REPORTS !== "undefined" && REPAIR_REPORTS.loadReports) REPAIR_REPORTS.loadReports();
+        else if (typeof REPORTS_PAGE !== "undefined" && REPORTS_PAGE.loadReports) REPORTS_PAGE.loadReports();
+      } else if (module === "dashboard" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof ORDERS_DASHBOARD_CLIENT !== "undefined" && ORDERS_DASHBOARD_CLIENT.init) ORDERS_DASHBOARD_CLIENT.init();
+        else if (typeof DASHBOARD_CLIENT !== "undefined" && DASHBOARD_CLIENT.init) DASHBOARD_CLIENT.init();
+        else if (typeof this.loadDashboard === "function") this.loadDashboard();
+      } else if (module === "leads" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof LEAD_CLIENT !== "undefined" && LEAD_CLIENT.init) LEAD_CLIENT.init();
+      } else if (module === "opportunities" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof OPPORTUNITY_CLIENT !== "undefined" && OPPORTUNITY_CLIENT.init) OPPORTUNITY_CLIENT.init();
+      } else if (module === "interactions" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof INTERACTION_CLIENT !== "undefined" && INTERACTION_CLIENT.init) INTERACTION_CLIENT.init();
+      } else if (module === "tasks" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof TASK_CLIENT !== "undefined" && TASK_CLIENT.init) TASK_CLIENT.init();
+      } else if (module === "assets" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof ASSET_PAGE !== "undefined" && ASSET_PAGE.init) ASSET_PAGE.init();
+      } else if (module === "assignments" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof ASSIGNMENT_PAGE !== "undefined" && ASSIGNMENT_PAGE.init) ASSIGNMENT_PAGE.init();
+      } else if (module === "transfers" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof TRANSFER_PAGE !== "undefined" && TRANSFER_PAGE.init) TRANSFER_PAGE.init();
+      } else if (module === "maintenance" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof MAINTENANCE_PAGE !== "undefined" && MAINTENANCE_PAGE.init) MAINTENANCE_PAGE.init();
+      } else if (module === "repairs" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof ORDERS_PAGE !== "undefined" && ORDERS_PAGE.init) ORDERS_PAGE.init();
+      } else if (module === "reception" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof RECEPTION_PAGE !== "undefined" && RECEPTION_PAGE.init) RECEPTION_PAGE.init();
+      } else if (module === "history" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof HISTORY_PAGE !== "undefined" && HISTORY_PAGE.init) HISTORY_PAGE.init();
+      } else if (module === "trips" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof TRIPS_CLIENT !== "undefined" && TRIPS_CLIENT.init) TRIPS_CLIENT.init();
+      } else if (module === "request" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof REQUEST_CLIENT !== "undefined" && REQUEST_CLIENT.init) REQUEST_CLIENT.init();
+      } else if (module === "approvals" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof APPROVALS_PAGE !== "undefined" && APPROVALS_PAGE.loadData) APPROVALS_PAGE.loadData();
+      } else if (module === "settlements" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof SETTLEMENTS_PAGE !== "undefined" && SETTLEMENTS_PAGE.loadData) SETTLEMENTS_PAGE.loadData();
+      } else if (module === "users" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof USERS_CLIENT !== "undefined" && USERS_CLIENT.init) USERS_CLIENT.init();
+      } else if (module === "roles" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof ROLES_CLIENT !== "undefined" && ROLES_CLIENT.init) ROLES_CLIENT.init();
+      } else if (module === "menus" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof MENUS_CLIENT !== "undefined" && MENUS_CLIENT.init) MENUS_CLIENT.init();
+      } else if (module === "settings" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof SETTINGS_CLIENT !== "undefined" && SETTINGS_CLIENT.init) SETTINGS_CLIENT.init();
+      } else if (module === "audit-log" && targetViewEl) {
+        targetViewEl.style.display = "block";
+        if (typeof AUDIT_CLIENT !== "undefined" && AUDIT_CLIENT.init) AUDIT_CLIENT.init();
+      } else if (targetViewEl) {
+        targetViewEl.style.display = "block";
+      } else if (placeholderView) {
+        placeholderView.style.display = "block";
+        this.stopPageLoading();
+
+        var phTitle = document.getElementById("placeholder-title");
+        var phDesc = document.getElementById("placeholder-desc");
+        var phIcon = document.getElementById("placeholder-icon");
+
+        if (phTitle) phTitle.textContent = title;
+        if (phDesc) phDesc.textContent = desc;
+
+        var navIcon = itemEl.querySelector(".nav-icon");
+        if (phIcon && navIcon) {
+          phIcon.innerHTML = navIcon.innerHTML;
+        }
+      }
+
+      // 5. Nếu đang ở màn hình Mobile, tự động đóng Drawer để người dùng thấy nội dung ngay
+      if (window.innerWidth <= 992) {
+        this.closeSidebar();
+      }
+
+      // Cuộn lên đầu trang nội dung
+      var mainContent = document.querySelector(".app-main-content");
+      if (mainContent) mainContent.scrollTop = 0;
+    },
+
+    /**
+     * Kiểm tra người dùng hiện tại có quyền thao tác mã quyền này hay không (Tầng 2: Quyền Thao tác Chức năng)
+     * @param {string} actionCode 
+     * @returns {boolean}
+     */
+    hasPermission: function(actionCode) {
+      if (!this.currentUser) return false;
+      if (this.currentUser.is_admin) return true;
+      var actionPerms = this.currentUser.action_permissions || this.currentUser.permissions || [];
+      if (actionPerms.indexOf("*") !== -1) return true;
+      return actionPerms.indexOf(actionCode) !== -1;
+    },
+
+    /**
+     * Trả về icon SVG chuẩn cho từng mục Menu động từ bảng MENUS
+     */
+    getMenuIconSvg: function(iconName) {
+      switch (String(iconName || "").toLowerCase()) {
+        case "grid":
+        case "dashboard":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>';
+        case "users":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg>';
+        case "shield":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>';
+        case "menu":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>';
+        case "file-text":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>';
+        case "settings":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"></path></svg>';
+        default:
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>';
+      }
+    },
+
+    /**
+     * Render Sidebar động từ `user.menu_groups` (đã hợp nhất ROLE_MENUS + USER_MENUS GRANT/DENY từ Core Library)
+     */
+    renderDynamicSidebar: function(user) {
+      if (!user || !Array.isArray(user.menu_groups) || user.menu_groups.length === 0) return;
+      var container = document.getElementById("sidebar-dynamic-groups");
+      if (!container) return;
+
+      var self = this;
+      var activeMod = this.currentModule || "dashboard";
+      var html = "";
+
+      user.menu_groups.forEach(function(grp) {
+        if (!grp || !Array.isArray(grp.items) || grp.items.length === 0) return;
+        html += '<div class="nav-group">';
+        html += '<div class="nav-group-title">' + UTILS.escapeHtml(grp.group_name) + '</div>';
+        html += '<ul class="nav-list">';
+        grp.items.forEach(function(item) {
+          var modCode = item.route_module || item.code;
+          var isAct = (modCode === activeMod) ? " active" : "";
+          var badgeHtml = "";
+          html += '<li>' +
+            '<div class="nav-item' + isAct + '"' +
+              ' data-module="' + UTILS.escapeHtml(modCode) + '"' +
+              ' data-menu-perm="' + UTILS.escapeHtml(item.permission_code || "") + '"' +
+              ' data-title="' + UTILS.escapeHtml(item.name) + '"' +
+              ' data-group="' + UTILS.escapeHtml(grp.group_name) + '"' +
+              ' data-desc="' + UTILS.escapeHtml(item.description || "") + '">' +
+              '<span class="nav-icon">' + self.getMenuIconSvg(item.icon) + '</span>' +
+              '<span class="nav-label">' + UTILS.escapeHtml(item.name) + '</span>' +
+              badgeHtml +
+            '</div>' +
+          '</li>';
+        });
+        html += '</ul></div>';
+      });
+
+      container.innerHTML = html;
+      container.querySelectorAll(".nav-item").forEach(function(el) {
+        el.addEventListener("click", function() {
+          self.handleNavClick(this);
+        });
+      });
+    },
+
+    /**
+     * Áp dụng phân quyền Menu (Tầng 1): Chỉ hiển thị các mục menu và nhóm menu mà người dùng được cấp quyền
+     * @param {Object} user 
+     */
+    applyMenuPermissions: function(user) {
+      if (!user) return;
+      var self = this;
+
+      // Nếu Core trả về cây menu động (MENUS + ROLE_MENUS + USER_MENUS), ưu tiên render động
+      if (Array.isArray(user.menu_groups) && user.menu_groups.length > 0) {
+        this.renderDynamicSidebar(user);
+      }
+
+      var isAdmin = user.is_admin || (user.permissions && user.permissions.indexOf("*") !== -1);
+      var menuPerms = user.menu_permissions || user.permissions || [];
+
+      // 1. Lọc từng mục nav-item dựa theo data-menu-perm
+      var navItems = document.querySelectorAll(".nav-item");
+      navItems.forEach(function(item) {
+        var menuPerm = item.getAttribute("data-menu-perm") || item.getAttribute("data-permission");
+        var parentLi = item.closest("li");
+        if (!menuPerm || isAdmin || menuPerms.indexOf(menuPerm) !== -1 || menuPerms.indexOf("*") !== -1) {
+          if (parentLi) parentLi.style.display = "";
+        } else {
+          if (parentLi) parentLi.style.display = "none";
+        }
+      });
+
+      // 2. Lọc từng nhóm nav-group (Nếu tất cả mục trong nhóm bị ẩn thì ẩn cả nhóm)
+      var navGroups = document.querySelectorAll(".nav-group");
+      navGroups.forEach(function(group) {
+        var listItems = group.querySelectorAll(".nav-list li");
+        var hasVisibleItem = false;
+        listItems.forEach(function(li) {
+          if (li.style.display !== "none") {
+            hasVisibleItem = true;
+          }
+        });
+        group.style.display = hasVisibleItem ? "" : "none";
+      });
+
+      // 3. Nếu chức năng hiện tại không nằm trong danh sách quyền, chuyển về chức năng đầu tiên hiển thị
+      var currentItem = document.querySelector(".nav-item[data-module='" + self.currentModule + "']");
+      if (currentItem && currentItem.closest("li") && currentItem.closest("li").style.display === "none") {
+        var firstVisibleItem = document.querySelector(".nav-list li:not([style*='display: none']) .nav-item");
+        if (firstVisibleItem) {
+          self.handleNavClick(firstVisibleItem);
+        }
+      }
+    },
+
+    /**
+     * Chuyển đổi giữa màn hình Đăng nhập và Không gian làm việc
+     * @param {string} viewName "auth" hoặc "app"
+     */
+    switchView: function(viewName) {
+      var authEl = document.getElementById("auth-view");
+      var appEl = document.getElementById("app-view");
+
+      if (viewName === "app") {
+        if (authEl) authEl.style.display = "none";
+        if (appEl) appEl.style.display = "flex";
+      } else {
+        if (appEl) appEl.style.display = "none";
+        if (authEl) authEl.style.display = "flex";
+      }
+    },
+
+    /**
+     * Cập nhật thông tin người dùng lên thanh tiêu đề
+     * @param {Object} user 
+     */
+    updateUserUI: function(user) {
+      if (!user) return;
+      var nameEl = document.getElementById("header-user-name");
+      var roleEl = document.getElementById("header-user-role");
+      var avatarEl = document.getElementById("header-user-avatar");
+      var welcomeUserEl = document.getElementById("welcome-user-name");
+
+      var displayName = user.full_name || user.username || "Người dùng";
+      if (nameEl) nameEl.textContent = displayName;
+      if (welcomeUserEl) welcomeUserEl.textContent = displayName;
+
+      if (avatarEl) {
+        var initial = (displayName.charAt(0) || "U").toUpperCase();
+        avatarEl.textContent = initial;
+      }
+
+      if (roleEl) {
+        var roleNames = (user.roles || []).map(function(r) { return r.name; }).join(", ");
+        roleEl.textContent = roleNames || "Nhân viên";
+      }
+
+      // Cập nhật hiển thị nút Xóa Cache trên Header (chỉ Admin mới thấy)
+      var clearCacheBtn = document.getElementById("btn-header-clear-cache");
+      if (clearCacheBtn) {
+        var isAdmin = user.is_admin || (user.permissions && user.permissions.indexOf("*") !== -1) || 
+                      (user.roles && user.roles.some(function(r) { return r.code === "Admin" || r.id === "ROLE_ADMIN"; }));
+        clearCacheBtn.style.display = isAdmin ? "flex" : "none";
+      }
+    },
+
+    /**
+     * Lưu thông tin phiên vào bộ nhớ và localStorage/sessionStorage
+     * @param {Object} authData 
+     */
+    saveSession: function(authData) {
+      if (!authData) return;
+      this.currentUser = authData;
+      this.token = authData.token;
+      try {
+        localStorage.setItem(this.SESSION_STORAGE_KEY, JSON.stringify(authData));
+      } catch (e) {}
+      try {
+        sessionStorage.setItem(this.SESSION_STORAGE_KEY, JSON.stringify(authData));
+      } catch (e) {}
+    },
+
+    /**
+     * Lấy thông tin phiên từ bộ nhớ hoặc Storage
+     * @returns {Object|null}
+     */
+    getSession: function() {
+      if (this.currentUser && this.token) {
+        return this.currentUser;
+      }
+      try {
+        var dataStr = localStorage.getItem(this.SESSION_STORAGE_KEY);
+        if (dataStr) {
+          var parsed = JSON.parse(dataStr);
+          if (parsed && parsed.token) {
+            this.currentUser = parsed;
+            this.token = parsed.token;
+            return parsed;
+          }
+        }
+      } catch (e) {}
+      try {
+        var dataStr2 = sessionStorage.getItem(this.SESSION_STORAGE_KEY);
+        if (dataStr2) {
+          var parsed2 = JSON.parse(dataStr2);
+          if (parsed2 && parsed2.token) {
+            this.currentUser = parsed2;
+            this.token = parsed2.token;
+            return parsed2;
+          }
+        }
+      } catch (e) {}
+      return null;
+    },
+
+    /**
+     * Xóa phiên làm việc
+     */
+    clearSession: function() {
+      this.currentUser = null;
+      this.token = null;
+      try {
+        localStorage.removeItem(this.SESSION_STORAGE_KEY);
+      } catch (e) {}
+      try {
+        sessionStorage.removeItem(this.SESSION_STORAGE_KEY);
+      } catch (e) {}
+    },
+
+    /**
+     * Hiển thị thông báo Toast
+     * @param {string} message Nội dung thông báo
+     * @param {string} type "success" | "error" | "info"
+     * @param {number} duration Thời gian hiển thị (ms)
+     */
+    showToast: function(message, type, duration) {
+      type = type || "info";
+      duration = duration || 3500;
+
+      var container = document.getElementById("toast-container");
+      if (!container) return;
+
+      var toast = document.createElement("div");
+      toast.className = "toast toast-" + type;
+
+      var iconSvg = "";
+      if (type === "success") {
+        iconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      } else if (type === "error") {
+        iconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
+      } else {
+        iconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+      }
+
+      toast.innerHTML = iconSvg + "<span>" + message + "</span>";
+      container.appendChild(toast);
+
+      setTimeout(function() {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateX(40px)";
+        toast.style.transition = "all 0.3s ease";
+        setTimeout(function() {
+          if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
+      }, duration);
+    },
+
+    /**
+     * Bật/tắt trạng thái loading cho nút bấm
+     * @param {HTMLButtonElement} btn 
+     * @param {boolean} isLoading 
+     * @param {string} defaultHtml 
+     */
+    setButtonLoading: function(btn, isLoading, loadingText) {
+      if (!btn) return;
+      if (typeof btn === "string") btn = document.getElementById(btn);
+      if (!btn) return;
+
+      if (isLoading) {
+        if (btn.disabled && btn.classList.contains("btn-loading")) return;
+        btn.disabled = true;
+        if (!btn.getAttribute("data-original-html")) {
+          btn.setAttribute("data-original-html", btn.innerHTML);
+        }
+        btn.classList.add("btn-loading");
+        var text = (typeof loadingText === "string" && loadingText.trim()) ? loadingText : "Đang xử lý...";
+        btn.innerHTML = '<span class="btn-spinner"></span><span>' + text + '</span>';
+      } else {
+        btn.disabled = false;
+        btn.classList.remove("btn-loading");
+        var orig = btn.getAttribute("data-original-html");
+        if (orig) {
+          btn.innerHTML = orig;
+          btn.removeAttribute("data-original-html");
+        }
+      }
+    },
+
+    /**
+     * Render thanh điều hướng phân trang chuẩn toàn hệ thống
+     * @param {string} containerId ID phần tử chứa thanh phân trang
+     * @param {Object} pagination { page, pageSize, total, totalPages, startIndex, endIndex, hasNext, hasPrev }
+     * @param {Function} onPageChangeCallback Callback khi đổi trang hoặc pageSize: function(newPage, newPageSize)
+     */
+    renderPagination: function(containerId, pagination, onPageChangeCallback) {
+      var container = document.getElementById(containerId);
+      if (!container) return;
+
+      if (!pagination || pagination.total === 0) {
+        container.innerHTML = "";
+        container.style.display = "none";
+        return;
+      }
+
+      container.style.display = "flex";
+      var page = pagination.page || 1;
+      var pageSize = pagination.pageSize || 10;
+      var total = pagination.total || 0;
+      var totalPages = pagination.totalPages || 1;
+      var startIndex = pagination.startIndex || 1;
+      var endIndex = pagination.endIndex || total;
+
+      var sizes = [10, 25, 50, 100];
+      var sizeOptions = sizes.map(function(s) {
+        return '<option value="' + s + '" ' + (s === pageSize ? 'selected' : '') + '>' + s + ' / trang</option>';
+      }).join("");
+
+      // Xây dựng danh sách số trang thông minh
+      var pagesToRender = [];
+      if (totalPages <= 7) {
+        for (var p = 1; p <= totalPages; p++) pagesToRender.push(p);
+      } else {
+        pagesToRender.push(1);
+        if (page > 3) pagesToRender.push("...");
+
+        var startP = Math.max(2, page - 1);
+        var endP = Math.min(totalPages - 1, page + 1);
+        for (var i = startP; i <= endP; i++) {
+          pagesToRender.push(i);
+        }
+
+        if (page < totalPages - 2) pagesToRender.push("...");
+        pagesToRender.push(totalPages);
+      }
+
+      var navBtnsHtml = '';
+      // Nút Trang đầu
+      navBtnsHtml += '<button type="button" class="page-btn page-btn-first" ' + (page <= 1 ? 'disabled' : '') + ' title="Trang đầu">«</button>';
+      // Nút Trang trước
+      navBtnsHtml += '<button type="button" class="page-btn page-btn-prev" ' + (!pagination.hasPrev ? 'disabled' : '') + ' title="Trang trước">‹</button>';
+
+      // Các số trang
+      pagesToRender.forEach(function(item) {
+        if (item === "...") {
+          navBtnsHtml += '<span class="page-ellipsis">...</span>';
+        } else {
+          var isCur = (item === page);
+          navBtnsHtml += '<button type="button" class="page-btn ' + (isCur ? 'active' : '') + '" data-page="' + item + '">' + item + '</button>';
+        }
+      });
+
+      // Nút Trang sau
+      navBtnsHtml += '<button type="button" class="page-btn page-btn-next" ' + (!pagination.hasNext ? 'disabled' : '') + ' title="Trang sau">›</button>';
+      // Nút Trang cuối
+      navBtnsHtml += '<button type="button" class="page-btn page-btn-last" ' + (page >= totalPages ? 'disabled' : '') + ' title="Trang cuối">»</button>';
+
+      var html = 
+        '<div class="pagination-left">' +
+          '<div class="pagination-info">' +
+            'Hiển thị <strong>' + startIndex + ' - ' + endIndex + '</strong> trên tổng số <strong>' + total + '</strong> bản ghi' +
+          '</div>' +
+          '<div class="pagination-size-wrapper">' +
+            '<label style="font-size: 12px; color: var(--text-muted);">Số dòng:</label>' +
+            '<select class="pagination-size-select" id="' + containerId + '-size-select">' +
+              sizeOptions +
+            '</select>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pagination-right">' +
+          navBtnsHtml +
+        '</div>';
+
+      container.innerHTML = html;
+
+      // Gắn sự kiện cho select pageSize
+      var selEl = document.getElementById(containerId + "-size-select");
+      if (selEl) {
+        selEl.addEventListener("change", function() {
+          var newSize = parseInt(this.value, 10) || 10;
+          if (typeof onPageChangeCallback === "function") {
+            onPageChangeCallback(1, newSize);
+          }
+        });
+      }
+
+      // Gắn sự kiện cho các nút điều hướng
+      var btnFirst = container.querySelector(".page-btn-first");
+      if (btnFirst && !btnFirst.disabled) {
+        btnFirst.addEventListener("click", function() {
+          if (typeof onPageChangeCallback === "function") onPageChangeCallback(1, pageSize);
+        });
+      }
+
+      var btnPrev = container.querySelector(".page-btn-prev");
+      if (btnPrev && !btnPrev.disabled) {
+        btnPrev.addEventListener("click", function() {
+          if (typeof onPageChangeCallback === "function") onPageChangeCallback(page - 1, pageSize);
+        });
+      }
+
+      var numBtns = container.querySelectorAll(".page-btn[data-page]");
+      numBtns.forEach(function(btn) {
+        btn.addEventListener("click", function() {
+          var targetP = parseInt(this.getAttribute("data-page"), 10);
+          if (targetP && targetP !== page && typeof onPageChangeCallback === "function") {
+            onPageChangeCallback(targetP, pageSize);
+          }
+        });
+      });
+
+      var btnNext = container.querySelector(".page-btn-next");
+      if (btnNext && !btnNext.disabled) {
+        btnNext.addEventListener("click", function() {
+          if (typeof onPageChangeCallback === "function") onPageChangeCallback(page + 1, pageSize);
+        });
+      }
+
+      var btnLast = container.querySelector(".page-btn-last");
+      if (btnLast && !btnLast.disabled) {
+        btnLast.addEventListener("click", function() {
+          if (typeof onPageChangeCallback === "function") onPageChangeCallback(totalPages, pageSize);
+        });
+      }
+    },
+
+    /**
+     * Mở modal xác nhận xóa bộ nhớ đệm hệ thống
+     */
+    promptClearCache: function() {
+      var modal = document.getElementById("modal-clear-cache");
+      if (modal) {
+        modal.classList.add("open");
+        var chk = document.getElementById("chk-reload-after-clear");
+        if (chk) chk.checked = true;
+      }
+    },
+
+    /**
+     * Đóng modal xác nhận xóa bộ nhớ đệm
+     */
+    closeClearCacheModal: function() {
+      var modal = document.getElementById("modal-clear-cache");
+      if (modal) modal.classList.remove("open");
+      var btn = document.getElementById("btn-confirm-clear-cache");
+      var txt = document.getElementById("btn-confirm-clear-text");
+      if (btn) btn.disabled = false;
+      if (txt) txt.textContent = "Xác nhận Xóa Cache";
+    },
+
+    /**
+     * Thực thi xóa bộ nhớ đệm hệ thống
+     */
+    executeClearCache: function() {
+      var self = this;
+      var token = self.token || (self.currentUser && self.currentUser.token) || localStorage.getItem("sp_token");
+      if (!token) {
+        self.showToast("Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.", "error");
+        return;
+      }
+
+      var btn = document.getElementById("btn-confirm-clear-cache");
+      var txt = document.getElementById("btn-confirm-clear-text");
+      var reloadChk = document.getElementById("chk-reload-after-clear");
+      var shouldReload = reloadChk ? reloadChk.checked : true;
+
+      if (btn) btn.disabled = true;
+      if (txt) txt.innerHTML = '<div class="spinner-sm" style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;margin-right:6px;animation:spin 0.8s linear infinite;vertical-align:middle;"></div> Đang xóa...';
+
+      if (typeof google !== "undefined" && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            self.closeClearCacheModal();
+            if (response && response.success) {
+              self.showToast(response.message || "Đã xóa toàn bộ bộ nhớ đệm hệ thống thành công!", "success");
+
+              // Xóa các cache client-side phụ trợ (giữ lại session token)
+              try {
+                Object.keys(localStorage).forEach(function(k) {
+                  if (k !== self.SESSION_STORAGE_KEY && k !== "sp_token" && k !== "sp_user") {
+                    localStorage.removeItem(k);
+                  }
+                });
+              } catch (e) {}
+
+              if (shouldReload) {
+                setTimeout(function() {
+                  window.location.reload();
+                }, 1000);
+              } else {
+                // Tải lại module hiện tại nếu có
+                var regMod = self.modules[self.currentModule];
+                if (regMod && typeof regMod.onReload === "function") {
+                  regMod.onReload();
+                } else if (self.currentModule === "settings" && typeof SETTINGS_CLIENT !== "undefined" && SETTINGS_CLIENT.loadSettings) {
+                  SETTINGS_CLIENT.loadSettings(true);
+                } else if (self.currentModule === "users" && typeof USERS_CLIENT !== "undefined" && USERS_CLIENT.loadUsers) {
+                  USERS_CLIENT.loadUsers(1);
+                } else if (self.currentModule === "roles" && typeof ROLES_CLIENT !== "undefined" && ROLES_CLIENT.loadRoles) {
+                  ROLES_CLIENT.loadRoles(1);
+                } else if (self.currentModule === "menus" && typeof MENUS_CLIENT !== "undefined" && MENUS_CLIENT.loadMenus) {
+                  MENUS_CLIENT.loadMenus(1);
+                } else if (self.currentModule === "audit-log" && typeof AUDIT_CLIENT !== "undefined" && AUDIT_CLIENT.loadLogs) {
+                  AUDIT_CLIENT.loadLogs(1);
+                }
+              }
+            } else {
+              var errMsg = (response && response.message) || "Không thể xóa bộ nhớ đệm máy chủ.";
+              self.showToast(errMsg, "error");
+            }
+          })
+          .withFailureHandler(function(err) {
+            self.closeClearCacheModal();
+            var errText = (err && err.message) || "Lỗi kết nối máy chủ Google Apps Script.";
+            self.showToast(errText, "error");
+          })
+          .apiClearSystemCache(token, {});
+      }
+    }
+  };
+
+  // Tự động khởi động APP khi trang web tải xong
+  document.addEventListener("DOMContentLoaded", function() {
+    APP.init();
+  });
+</script>

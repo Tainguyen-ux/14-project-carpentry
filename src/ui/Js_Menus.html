@@ -1,0 +1,258 @@
+<script>
+/**
+ * Js_Menus.html
+ * Giao diện Quản lý Danh mục Menu Điều hướng Động (Bảng MENUS) có tích hợp Phân trang bắt buộc APP.renderPagination.
+ */
+
+var MENUS_CLIENT = {
+  items: [],
+  isLoaded: false,
+  currentPage: 1,
+  pageSize: 10,
+  pagination: null,
+  searchTimeout: null,
+  filters: {
+    keyword: "",
+    status: ""
+  },
+
+  init: function() {
+    if (!this.isLoaded) {
+      this.bindEvents();
+      this.loadMenus(1, 10);
+    }
+  },
+
+  bindEvents: function() {
+    var self = this;
+    var searchEl = document.getElementById("menus-search-input");
+    if (searchEl && !searchEl.dataset.bound) {
+      searchEl.dataset.bound = "true";
+      searchEl.addEventListener("input", function() {
+        clearTimeout(self.searchTimeout);
+        var val = this.value;
+        self.searchTimeout = setTimeout(function() {
+          self.filters.keyword = val;
+          self.loadMenus(1, self.pageSize);
+        }, 300);
+      });
+    }
+
+    var statusEl = document.getElementById("menus-filter-status");
+    if (statusEl && !statusEl.dataset.bound) {
+      statusEl.dataset.bound = "true";
+      statusEl.addEventListener("change", function() {
+        self.filters.status = this.value;
+        self.loadMenus(1, self.pageSize);
+      });
+    }
+  },
+
+  loadMenus: function(page, pageSize) {
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || (window.AUTH && AUTH.getToken());
+    if (!token) return;
+
+    self.currentPage = page || self.currentPage || 1;
+    self.pageSize = pageSize || self.pageSize || 10;
+
+    var loadingEl = document.getElementById("menus-table-loading");
+    var tbody = document.getElementById("menus-table-tbody");
+    var emptyEl = document.getElementById("menus-table-empty");
+    if (loadingEl) loadingEl.style.display = "flex";
+    if (tbody) tbody.innerHTML = "";
+    if (emptyEl) emptyEl.style.display = "none";
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (typeof APP !== "undefined" && APP.stopPageLoading) APP.stopPageLoading();
+        if (loadingEl) loadingEl.style.display = "none";
+        if (!response || !response.success || !response.data) {
+          APP.showToast((response && response.message) || "Không thể tải danh sách Menu.", "error");
+          if (emptyEl) emptyEl.style.display = "block";
+          return;
+        }
+
+        self.isLoaded = true;
+        self.items = response.data.menus || [];
+        self.pagination = response.data.pagination;
+
+        var badge = document.getElementById("menus-count-badge");
+        if (badge) badge.textContent = (self.pagination ? self.pagination.total : self.items.length) + " mục menu";
+
+        if (self.items.length === 0) {
+          if (emptyEl) emptyEl.style.display = "block";
+          var pEl = document.getElementById("menus-pagination");
+          if (pEl) pEl.style.display = "none";
+        } else {
+          self.renderTable(self.items);
+          APP.renderPagination("menus-pagination", self.pagination, function(newPage, newSize) {
+            self.loadMenus(newPage, newSize);
+          });
+        }
+      })
+      .withFailureHandler(function(err) {
+        if (typeof APP !== "undefined" && APP.stopPageLoading) APP.stopPageLoading();
+        if (loadingEl) loadingEl.style.display = "none";
+        APP.showToast("Lỗi tải danh mục menu: " + (err && err.message ? err.message : err), "error");
+      })
+      .apiGetMenusList(token, self.filters, self.currentPage, self.pageSize);
+  },
+
+  renderTable: function(items) {
+    var tbody = document.getElementById("menus-table-tbody");
+    if (!tbody) return;
+    var canManage = APP.hasPermission("menus.manage");
+    var html = "";
+
+    items.forEach(function(m) {
+      var isLocked = String(m.status || "ACTIVE").toUpperCase() !== "ACTIVE";
+      var statusPill = isLocked
+        ? '<span class="status-pill status-locked"><span class="status-pill-dot"></span>Đã ẩn</span>'
+        : '<span class="status-pill status-active"><span class="status-pill-dot"></span>Hiển thị</span>';
+
+      html += '<tr>' +
+        '<td>' +
+          '<div style="font-weight:600;color:var(--text-main);">' + UTILS.escapeHtml(m.name) +
+            (m.badge_text ? ' <span class="nav-badge" style="position:static;margin-left:6px;">' + UTILS.escapeHtml(m.badge_text) + '</span>' : '') +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text-muted);">Mã: <code>' + UTILS.escapeHtml(m.code) + '</code> • Module: <code>' + UTILS.escapeHtml(m.route_module) + '</code></div>' +
+        '</td>' +
+        '<td>' + UTILS.escapeHtml(m.group_name) + '</td>' +
+        '<td><code>' + UTILS.escapeHtml(m.permission_code || "—") + '</code></td>' +
+        '<td style="text-align:center;font-weight:600;">' + Number(m.sort_order || 100) + '</td>' +
+        '<td>' + statusPill + '</td>' +
+        '<td style="text-align:right;">' +
+          (canManage
+            ? '<div class="btn-action-group">' +
+                '<button type="button" class="btn-icon-action btn-action-edit" title="Chỉnh sửa menu" onclick="MENUS_CLIENT.openEditModal(\'' + UTILS.escapeHtml(m.id) + '\')">' +
+                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>' +
+                '</button>' +
+                '<button type="button" class="btn-icon-action ' + (isLocked ? 'btn-action-unlock' : 'btn-action-lock') + '" title="' + (isLocked ? 'Bật hiển thị' : 'Ẩn menu') + '" onclick="MENUS_CLIENT.toggleStatus(\'' + UTILS.escapeHtml(m.id) + '\')">' +
+                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>' +
+                '</button>' +
+              '</div>'
+            : '<span style="font-size:12px;color:var(--text-muted);">Chỉ xem</span>') +
+        '</td>' +
+      '</tr>';
+    });
+
+    tbody.innerHTML = html;
+  },
+
+  openCreateModal: function() {
+    var modal = document.getElementById("modal-menu-form");
+    var title = document.getElementById("modal-menu-form-title");
+    var form = document.getElementById("form-menu");
+    if (form) form.reset();
+    document.getElementById("menu-form-id").value = "";
+    var codeEl = document.getElementById("menu-form-code");
+    if (codeEl) codeEl.disabled = false;
+    document.getElementById("menu-form-sort").value = "200";
+    document.getElementById("menu-form-icon").value = "layers";
+    if (title) title.textContent = "Thêm mục Menu điều hướng mới";
+    if (modal) modal.classList.add("open");
+    if (codeEl) codeEl.focus();
+  },
+
+  openEditModal: function(menuId) {
+    var m = this.items.find(function(x) { return x.id === menuId; });
+    if (!m) return;
+    var modal = document.getElementById("modal-menu-form");
+    var title = document.getElementById("modal-menu-form-title");
+    document.getElementById("menu-form-id").value = m.id;
+    var codeEl = document.getElementById("menu-form-code");
+    if (codeEl) {
+      codeEl.value = m.code;
+      codeEl.disabled = true;
+    }
+    document.getElementById("menu-form-name").value = m.name || "";
+    document.getElementById("menu-form-group").value = m.group_name || "Nghiệp vụ";
+    document.getElementById("menu-form-route").value = m.route_module || m.code;
+    document.getElementById("menu-form-perm").value = m.permission_code || "";
+    document.getElementById("menu-form-icon").value = m.icon || "layers";
+    document.getElementById("menu-form-badge").value = m.badge_text || "";
+    document.getElementById("menu-form-sort").value = m.sort_order || 100;
+    document.getElementById("menu-form-desc").value = m.description || "";
+
+    if (title) title.textContent = "Chỉnh sửa Menu: " + m.name;
+    if (modal) modal.classList.add("open");
+  },
+
+  closeMenuModal: function() {
+    var modal = document.getElementById("modal-menu-form");
+    if (modal) modal.classList.remove("open");
+  },
+
+  submitMenuForm: function(event) {
+    if (event && event.preventDefault) event.preventDefault();
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || (window.AUTH && AUTH.getToken());
+    if (!token) return;
+
+    var dto = {
+      id: document.getElementById("menu-form-id").value.trim(),
+      code: document.getElementById("menu-form-code").value.trim().toLowerCase(),
+      name: document.getElementById("menu-form-name").value.trim(),
+      group_name: document.getElementById("menu-form-group").value.trim(),
+      route_module: document.getElementById("menu-form-route").value.trim(),
+      permission_code: document.getElementById("menu-form-perm").value.trim(),
+      icon: document.getElementById("menu-form-icon").value.trim(),
+      badge_text: document.getElementById("menu-form-badge").value.trim(),
+      sort_order: parseInt(document.getElementById("menu-form-sort").value, 10) || 100,
+      description: document.getElementById("menu-form-desc").value.trim()
+    };
+
+    var btn = document.getElementById("btn-submit-menu");
+    var txt = document.getElementById("btn-submit-menu-text");
+    if (btn) btn.disabled = true;
+    if (txt) txt.textContent = "Đang lưu...";
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) btn.disabled = false;
+        if (txt) txt.textContent = "Lưu mục Menu";
+        if (res && res.success) {
+          APP.showToast(res.message || "Đã lưu mục Menu thành công!", "success");
+          self.closeMenuModal();
+          self.loadMenus(self.currentPage, self.pageSize);
+          // Đồng bộ lại Sidebar ngay lập tức cho phiên hiện tại
+          google.script.run.withSuccessHandler(function(sess) {
+            if (sess && sess.success && sess.data) {
+              APP.saveSession(Object.assign({}, APP.currentUser, sess.data, { token: token }));
+              APP.applyMenuPermissions(APP.currentUser);
+            }
+          }).apiCheckSession(token);
+        } else {
+          APP.showToast((res && res.message) || "Không thể lưu Menu.", "error");
+        }
+      })
+      .withFailureHandler(function(err) {
+        if (btn) btn.disabled = false;
+        if (txt) txt.textContent = "Lưu mục Menu";
+        APP.showToast("Lỗi máy chủ: " + (err && err.message ? err.message : err), "error");
+      })
+      .apiSaveMenu(token, dto);
+  },
+
+  toggleStatus: function(menuId) {
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || (window.AUTH && AUTH.getToken());
+    if (!token) return;
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res && res.success) {
+          APP.showToast(res.message, "success");
+          self.loadMenus(self.currentPage, self.pageSize);
+        } else {
+          APP.showToast((res && res.message) || "Không thể thay đổi trạng thái menu.", "error");
+        }
+      })
+      .withFailureHandler(function(err) {
+        APP.showToast("Lỗi máy chủ: " + (err && err.message ? err.message : err), "error");
+      })
+      .apiToggleMenuStatus(token, menuId);
+  }
+};
+</script>

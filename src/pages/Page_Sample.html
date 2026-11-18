@@ -1,0 +1,364 @@
+<!-- =========================================================================
+     Page_Sample.html
+     Module Nghiệp vụ Mẫu khép kín (View + Modal + Client Script đăng ký qua APP.registerModule)
+     Khi làm dự án thật (CRM, Kho, Đặt lịch...), nhân bản file này cho từng màn hình nghiệp vụ!
+     ========================================================================= -->
+
+<div id="view-sample" class="content-view" style="display: none;">
+  <div class="data-card">
+    <div class="data-toolbar">
+      <div class="toolbar-left">
+        <div class="search-box">
+          <span class="search-box-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </span>
+          <input type="text" id="sample-search-input" class="search-input" placeholder="Tìm theo mã, tên bản ghi, phân loại...">
+        </div>
+
+        <select id="sample-filter-status" class="filter-select">
+          <option value="">Tất cả trạng thái</option>
+          <option value="ACTIVE">Đang hoạt động</option>
+          <option value="INACTIVE">Ngừng sử dụng</option>
+        </select>
+
+        <div class="badge-counter" id="sample-count-badge">0 bản ghi</div>
+      </div>
+
+      <div class="toolbar-right">
+        <button type="button" class="btn btn-secondary" id="btn-refresh-sample" onclick="SAMPLE_CLIENT.loadItems(1)">
+          <span>Tải lại</span>
+        </button>
+        <button type="button" class="btn btn-primary" id="btn-add-sample" onclick="SAMPLE_CLIENT.openCreateModal()">
+          <span>+ Thêm dữ liệu mẫu</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width: 140px;">Mã bản ghi</th>
+            <th>Tên bản ghi mẫu</th>
+            <th style="width: 170px;">Phân loại</th>
+            <th style="width: 140px;">Trạng thái</th>
+            <th style="width: 165px;">Cập nhật lúc</th>
+            <th style="width: 130px; text-align: right;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="sample-table-tbody"></tbody>
+      </table>
+
+      <div id="sample-table-loading" class="table-loading" style="display: none;">
+        <div class="spinner"></div>
+        <span>Đang tải dữ liệu nghiệp vụ mẫu...</span>
+      </div>
+
+      <div id="sample-table-empty" class="table-empty" style="display: none;">
+        <h4>Chưa có bản ghi nghiệp vụ nào</h4>
+        <p>Bảng <code>SAMPLE_ITEMS</code> khởi tạo trắng chuẩn Production. Nhấn <strong>+ Thêm dữ liệu mẫu</strong> để kiểm tra luồng CRUD.</p>
+      </div>
+    </div>
+
+    <div id="sample-pagination" class="pagination-wrapper" style="display: none;"></div>
+  </div>
+
+  <!-- MODAL: Thêm / Sửa Bản ghi Mẫu -->
+  <div id="modal-sample-form" class="modal-backdrop">
+    <div class="modal-dialog" style="max-width: 520px; width: 95%;">
+      <div class="modal-header">
+        <div class="modal-header-info">
+          <div>
+            <h3 class="modal-title" id="modal-sample-title">Thêm bản ghi mẫu</h3>
+            <p class="modal-subtitle">Minh họa kết nối sang Core Library (Authorization + Batch Data + Audit)</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" onclick="SAMPLE_CLIENT.closeModal()">✕</button>
+      </div>
+
+      <form id="form-sample" onsubmit="SAMPLE_CLIENT.submitForm(event)">
+        <input type="hidden" id="sample-form-id" value="">
+        <div class="modal-body" style="padding: 20px;">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="sample-form-code">Mã bản ghi (Tự sinh nếu để trống)</label>
+              <input type="text" id="sample-form-code" class="form-input" placeholder="Ví dụ: SMP0001">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="sample-form-status">Trạng thái</label>
+              <select id="sample-form-status" class="form-input">
+                <option value="ACTIVE">Đang hoạt động</option>
+                <option value="INACTIVE">Ngừng sử dụng</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label required" for="sample-form-name">Tên bản ghi</label>
+            <input type="text" id="sample-form-name" class="form-input" placeholder="Nhập tên hạng mục nghiệp vụ..." required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="sample-form-category">Nhóm phân loại</label>
+            <input type="text" id="sample-form-category" class="form-input" placeholder="Ví dụ: Khách hàng VIP, Vật tư nhóm A..." value="Chung">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="sample-form-notes">Ghi chú</label>
+            <textarea id="sample-form-notes" class="form-input" rows="2" placeholder="Ghi chú bổ sung..."></textarea>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="SAMPLE_CLIENT.closeModal()">Hủy</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-sample">
+            <span id="btn-submit-sample-text">Lưu dữ liệu</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+var SAMPLE_CLIENT = {
+  items: [],
+  isLoaded: false,
+  currentPage: 1,
+  pageSize: 10,
+  pagination: null,
+  searchTimeout: null,
+  filters: { keyword: "", status: "" },
+
+  init: function() {
+    var addBtn = document.getElementById("btn-add-sample");
+    if (addBtn) {
+      addBtn.style.display = APP.hasPermission("sample.create") ? "" : "none";
+    }
+    if (!this.isLoaded) {
+      this.bindEvents();
+      this.loadItems(1, 10);
+    }
+  },
+
+  bindEvents: function() {
+    var self = this;
+    var sInput = document.getElementById("sample-search-input");
+    if (sInput && !sInput.dataset.bound) {
+      sInput.dataset.bound = "true";
+      sInput.addEventListener("input", function() {
+        clearTimeout(self.searchTimeout);
+        var v = this.value;
+        self.searchTimeout = setTimeout(function() {
+          self.filters.keyword = v;
+          self.loadItems(1, self.pageSize);
+        }, 300);
+      });
+    }
+    var stSelect = document.getElementById("sample-filter-status");
+    if (stSelect && !stSelect.dataset.bound) {
+      stSelect.dataset.bound = "true";
+      stSelect.addEventListener("change", function() {
+        self.filters.status = this.value;
+        self.loadItems(1, self.pageSize);
+      });
+    }
+  },
+
+  loadItems: function(page, pageSize) {
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || (window.AUTH && AUTH.getToken());
+    if (!token) return;
+
+    self.currentPage = page || self.currentPage || 1;
+    self.pageSize = pageSize || self.pageSize || 10;
+
+    var loadingEl = document.getElementById("sample-table-loading");
+    var tbody = document.getElementById("sample-table-tbody");
+    var emptyEl = document.getElementById("sample-table-empty");
+    if (loadingEl) loadingEl.style.display = "flex";
+    if (tbody) tbody.innerHTML = "";
+    if (emptyEl) emptyEl.style.display = "none";
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (loadingEl) loadingEl.style.display = "none";
+        if (!res || !res.success || !res.data) {
+          APP.showToast((res && res.message) || "Không thể tải dữ liệu mẫu.", "error");
+          if (emptyEl) emptyEl.style.display = "block";
+          return;
+        }
+        self.isLoaded = true;
+        self.items = res.data.items || [];
+        self.pagination = res.data.pagination;
+
+        var badge = document.getElementById("sample-count-badge");
+        if (badge) badge.textContent = (self.pagination ? self.pagination.total : self.items.length) + " bản ghi";
+
+        if (self.items.length === 0) {
+          if (emptyEl) emptyEl.style.display = "block";
+          var pEl = document.getElementById("sample-pagination");
+          if (pEl) pEl.style.display = "none";
+        } else {
+          self.renderTable(self.items);
+          APP.renderPagination("sample-pagination", self.pagination, function(newPage, newSize) {
+            self.loadItems(newPage, newSize);
+          });
+        }
+      })
+      .withFailureHandler(function(err) {
+        if (loadingEl) loadingEl.style.display = "none";
+        APP.showToast("Lỗi kết nối máy chủ: " + (err && err.message ? err.message : err), "error");
+      })
+      .apiGetSampleItems(token, self.filters, self.currentPage, self.pageSize);
+  },
+
+  renderTable: function(items) {
+    var tbody = document.getElementById("sample-table-tbody");
+    if (!tbody) return;
+    var canUpdate = APP.hasPermission("sample.update");
+    var canDelete = APP.hasPermission("sample.delete");
+    var html = "";
+
+    items.forEach(function(it) {
+      var isAct = String(it.status || "ACTIVE").toUpperCase() === "ACTIVE";
+      var pill = isAct
+        ? '<span class="status-pill status-active"><span class="status-pill-dot"></span>Hoạt động</span>'
+        : '<span class="status-pill status-locked"><span class="status-pill-dot"></span>Ngừng dùng</span>';
+
+      html += '<tr>' +
+        '<td><code>' + UTILS.escapeHtml(it.item_code) + '</code></td>' +
+        '<td>' +
+          '<div style="font-weight:600;color:var(--text-main);">' + UTILS.escapeHtml(it.item_name) + '</div>' +
+          (it.notes ? '<div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(it.notes) + '</div>' : '') +
+        '</td>' +
+        '<td>' + UTILS.escapeHtml(it.category) + '</td>' +
+        '<td>' + pill + '</td>' +
+        '<td style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(it.updated_at || it.created_at) + '</td>' +
+        '<td style="text-align:right;">' +
+          '<div class="btn-action-group">' +
+            (canUpdate
+              ? '<button type="button" class="btn-icon-action btn-action-edit" title="Sửa" onclick="SAMPLE_CLIENT.openEditModal(\'' + UTILS.escapeHtml(it.id) + '\')">' +
+                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>' +
+                '</button>'
+              : '') +
+            (canDelete
+              ? '<button type="button" class="btn-icon-action btn-action-lock" title="Xóa" onclick="SAMPLE_CLIENT.deleteItem(\'' + UTILS.escapeHtml(it.id) + '\')">' +
+                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>' +
+                '</button>'
+              : '') +
+          '</div>' +
+        '</td>' +
+      '</tr>';
+    });
+
+    tbody.innerHTML = html;
+  },
+
+  openCreateModal: function() {
+    var form = document.getElementById("form-sample");
+    if (form) form.reset();
+    document.getElementById("sample-form-id").value = "";
+    var codeEl = document.getElementById("sample-form-code");
+    if (codeEl) codeEl.disabled = false;
+    document.getElementById("modal-sample-title").textContent = "Thêm bản ghi mẫu";
+    document.getElementById("modal-sample-form").classList.add("open");
+    document.getElementById("sample-form-name").focus();
+  },
+
+  openEditModal: function(id) {
+    var it = this.items.find(function(x) { return x.id === id; });
+    if (!it) return;
+    document.getElementById("sample-form-id").value = it.id;
+    var codeEl = document.getElementById("sample-form-code");
+    if (codeEl) {
+      codeEl.value = it.item_code || "";
+      codeEl.disabled = true;
+    }
+    document.getElementById("sample-form-name").value = it.item_name || "";
+    document.getElementById("sample-form-category").value = it.category || "Chung";
+    document.getElementById("sample-form-status").value = it.status || "ACTIVE";
+    document.getElementById("sample-form-notes").value = it.notes || "";
+    document.getElementById("modal-sample-title").textContent = "Cập nhật: " + it.item_code;
+    document.getElementById("modal-sample-form").classList.add("open");
+  },
+
+  closeModal: function() {
+    var modal = document.getElementById("modal-sample-form");
+    if (modal) modal.classList.remove("open");
+  },
+
+  submitForm: function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || (window.AUTH && AUTH.getToken());
+    if (!token) return;
+
+    var dto = {
+      id: document.getElementById("sample-form-id").value.trim(),
+      item_code: document.getElementById("sample-form-code").value.trim(),
+      item_name: document.getElementById("sample-form-name").value.trim(),
+      category: document.getElementById("sample-form-category").value.trim(),
+      status: document.getElementById("sample-form-status").value,
+      notes: document.getElementById("sample-form-notes").value.trim()
+    };
+
+    var btn = document.getElementById("btn-submit-sample");
+    var txt = document.getElementById("btn-submit-sample-text");
+    if (btn) btn.disabled = true;
+    if (txt) txt.textContent = "Đang lưu...";
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) btn.disabled = false;
+        if (txt) txt.textContent = "Lưu dữ liệu";
+        if (res && res.success) {
+          APP.showToast(res.message, "success");
+          self.closeModal();
+          self.loadItems(1, self.pageSize);
+        } else {
+          APP.showToast((res && res.message) || "Không thể lưu dữ liệu.", "error");
+        }
+      })
+      .withFailureHandler(function(err) {
+        if (btn) btn.disabled = false;
+        if (txt) txt.textContent = "Lưu dữ liệu";
+        APP.showToast("Lỗi máy chủ: " + (err && err.message ? err.message : err), "error");
+      })
+      .apiSaveSampleItem(token, dto);
+  },
+
+  deleteItem: function(id) {
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || (window.AUTH && AUTH.getToken());
+    if (!token) return;
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res && res.success) {
+          APP.showToast(res.message, "success");
+          self.loadItems(self.currentPage, self.pageSize);
+        } else {
+          APP.showToast((res && res.message) || "Không thể xóa bản ghi.", "error");
+        }
+      })
+      .withFailureHandler(function(err) {
+        APP.showToast("Lỗi máy chủ: " + (err && err.message ? err.message : err), "error");
+      })
+      .apiDeleteSampleItem(token, id);
+  }
+};
+
+document.addEventListener("DOMContentLoaded", function() {
+  if (typeof APP !== "undefined" && APP.registerModule) {
+    APP.registerModule("sample", {
+      viewId: "view-sample",
+      onInit: function() { SAMPLE_CLIENT.init(); },
+      onReload: function() { SAMPLE_CLIENT.loadItems(1); }
+    });
+  }
+});
+</script>

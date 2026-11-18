@@ -1,0 +1,425 @@
+<script>
+/**
+ * Js_Settings.html
+ * Điều khiển giao diện Cấu hình Hệ thống & Tham số Mở rộng Động (Bảng CONFIG) trên nền Core Library.
+ */
+
+var SETTINGS_CLIENT = {
+  state: {
+    isLoading: false,
+    isSaving: false,
+    isLoaded: false,
+    currentTab: "company",
+    settings: {},
+    list: [],
+    initialSettings: {},
+    lastUpdatedAt: "",
+    lastUpdatedBy: "",
+    appName: "",
+    appVersion: ""
+  },
+
+  CORE_STATIC_KEYS: [
+    "COMPANY_NAME", "COMPANY_TAX_CODE", "COMPANY_PHONE", "COMPANY_EMAIL", "COMPANY_ADDRESS", "COMPANY_WEBSITE",
+    "PRINT_HEADER_TITLE", "PRINT_FOOTER_NOTE", "DATE_FORMAT", "CURRENCY_SYMBOL",
+    "TIMEZONE", "APP_VERSION"
+  ],
+
+  init: function() {
+    var savedTab = sessionStorage.getItem("SETTINGS_ACTIVE_TAB") || "company";
+    this.switchTab(savedTab);
+
+    if (!this.state.isLoaded) {
+      this.loadSettings();
+    }
+  },
+
+  switchTab: function(tabName) {
+    if (!tabName) tabName = "company";
+    this.state.currentTab = tabName;
+
+    var tabBtns = document.querySelectorAll(".settings-tab-btn");
+    tabBtns.forEach(function(btn) {
+      if (btn.getAttribute("data-tab") === tabName) {
+        btn.classList.add("active");
+      } else {
+        btn.classList.remove("active");
+      }
+    });
+
+    var panes = document.querySelectorAll(".settings-tab-pane");
+    panes.forEach(function(pane) {
+      if (pane.id === "settings-tab-" + tabName) {
+        pane.style.display = "block";
+        pane.classList.add("active");
+      } else {
+        pane.style.display = "none";
+        pane.classList.remove("active");
+      }
+    });
+
+    try {
+      sessionStorage.setItem("SETTINGS_ACTIVE_TAB", tabName);
+    } catch (e) {}
+  },
+
+  loadSettings: function(forceReload) {
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || localStorage.getItem("sp_token");
+    if (!token) {
+      if (typeof APP !== "undefined" && APP.showToast) {
+        APP.showToast("Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.", "error");
+      }
+      return;
+    }
+
+    self.setLoadingState(true);
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        self.setLoadingState(false);
+        if (!response || !response.success) {
+          var errMsg = (response && response.message) || "Không thể tải dữ liệu cấu hình.";
+          if (typeof APP !== "undefined" && APP.showToast) {
+            APP.showToast(errMsg, "error");
+          }
+          return;
+        }
+
+        var data = response.data || {};
+        self.state.settings = Object.assign({}, data.settings || {});
+        self.state.list = Array.isArray(data.list) ? data.list : [];
+        self.state.initialSettings = Object.assign({}, data.settings || {});
+        self.state.lastUpdatedAt = data.last_updated_at || "";
+        self.state.lastUpdatedBy = data.last_updated_by || "";
+        self.state.appName = data.app_name || "Base AppScript Starter";
+        self.state.appVersion = data.app_version || "1.0.0";
+        self.state.isLoaded = true;
+
+        self.fillFormData(self.state.settings);
+        self.renderDynamicBusinessParams(self.state.list, self.state.settings);
+        self.updateMetaDisplay(data);
+
+        if (forceReload && typeof APP !== "undefined" && APP.showToast) {
+          APP.showToast("Đã tải lại dữ liệu cấu hình mới nhất.", "info");
+        }
+      })
+      .withFailureHandler(function(error) {
+        self.setLoadingState(false);
+        var errText = (error && error.message) || "Lỗi kết nối máy chủ Google Apps Script.";
+        if (typeof APP !== "undefined" && APP.showToast) {
+          APP.showToast(errText, "error");
+        }
+      })
+      .apiGetAppSettings(token);
+  },
+
+  fillFormData: function(settings) {
+    if (!settings) return;
+
+    this.setInputValue("setting-company-name", settings.COMPANY_NAME || "");
+    this.setInputValue("setting-company-tax-code", settings.COMPANY_TAX_CODE || "");
+    this.setInputValue("setting-company-phone", settings.COMPANY_PHONE || "");
+    this.setInputValue("setting-company-email", settings.COMPANY_EMAIL || "");
+    this.setInputValue("setting-company-address", settings.COMPANY_ADDRESS || "");
+    this.setInputValue("setting-company-website", settings.COMPANY_WEBSITE || "");
+
+    this.setInputValue("setting-print-header", settings.PRINT_HEADER_TITLE || "");
+    this.setInputValue("setting-print-footer", settings.PRINT_FOOTER_NOTE || "");
+    this.setInputValue("setting-date-format", settings.DATE_FORMAT || "dd/MM/yyyy");
+    this.setInputValue("setting-currency-symbol", settings.CURRENCY_SYMBOL || "VNĐ");
+
+    this.setInputValue("setting-timezone", settings.TIMEZONE || "Asia/Ho_Chi_Minh");
+    this.setInputValue("setting-app-version", settings.APP_VERSION || "1.0.0");
+  },
+
+  /**
+   * Render tự động các Tham số Động đặc thù của Dự án (không thuộc 12 khóa Core cố định)
+   */
+  renderDynamicBusinessParams: function(list, settingsMap) {
+    var container = document.getElementById("settings-dynamic-business-container");
+    if (!container) return;
+
+    var self = this;
+    var dynamicItems = (list || []).filter(function(item) {
+      return item && item.key && self.CORE_STATIC_KEYS.indexOf(item.key) === -1;
+    });
+
+    if (dynamicItems.length === 0) {
+      container.innerHTML = '<div style="padding: 18px; color: var(--text-muted); font-size: 13px; background: #f8fafc; border-radius: 8px; border: 1px dashed var(--border-color);">' +
+        'Chưa có tham số mở rộng nào. Bạn có thể khai báo trong <code>PROJECT_CONFIG.BUSINESS_CONFIGS</code> hoặc nhấn nút <strong>Thêm tham số động</strong>.' +
+        '</div>';
+      return;
+    }
+
+    var html = '<div class="settings-form-grid">';
+    dynamicItems.forEach(function(item) {
+      var val = settingsMap && settingsMap[item.key] !== undefined ? settingsMap[item.key] : (item.value || "");
+      var dType = String(item.data_type || "STRING").toUpperCase();
+      var inputHtml = "";
+
+      if (dType === "SELECT" && item.options_json) {
+        var opts = [];
+        try { opts = JSON.parse(item.options_json); } catch (e) {
+          opts = String(item.options_json).split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+        }
+        inputHtml = '<select class="form-input dynamic-config-input" data-dynamic-config-key="' + UTILS.escapeHtml(item.key) + '">';
+        opts.forEach(function(op) {
+          var sel = String(op) === String(val) ? "selected" : "";
+          inputHtml += '<option value="' + UTILS.escapeHtml(op) + '" ' + sel + '>' + UTILS.escapeHtml(op) + '</option>';
+        });
+        inputHtml += '</select>';
+      } else if (dType === "BOOLEAN") {
+        var isTrue = String(val).toUpperCase() === "TRUE";
+        inputHtml = '<select class="form-input dynamic-config-input" data-dynamic-config-key="' + UTILS.escapeHtml(item.key) + '">' +
+          '<option value="TRUE" ' + (isTrue ? "selected" : "") + '>Bật (TRUE)</option>' +
+          '<option value="FALSE" ' + (!isTrue ? "selected" : "") + '>Tắt (FALSE)</option>' +
+        '</select>';
+      } else if (dType === "TEXTAREA") {
+        inputHtml = '<textarea class="form-input dynamic-config-input" rows="2" data-dynamic-config-key="' + UTILS.escapeHtml(item.key) + '">' + UTILS.escapeHtml(val) + '</textarea>';
+      } else {
+        var inType = (dType === "NUMBER") ? "number" : "text";
+        inputHtml = '<input type="' + inType + '" class="form-input dynamic-config-input" data-dynamic-config-key="' + UTILS.escapeHtml(item.key) + '" value="' + UTILS.escapeHtml(val) + '">';
+      }
+
+      html += '<div class="form-group">' +
+        '<label class="form-label">' + UTILS.escapeHtml(item.label || item.key) + ' <code style="font-size:11px;color:#64748b;">(' + UTILS.escapeHtml(item.key) + ')</code></label>' +
+        inputHtml +
+        (item.description ? '<div class="form-help-text">' + UTILS.escapeHtml(item.description) + '</div>' : '') +
+      '</div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+  },
+
+  updateMetaDisplay: function(data) {
+    var updateBadge = document.getElementById("settings-last-updated-badge");
+    if (updateBadge) {
+      var timeStr = data.last_updated_at || "Chưa cập nhật";
+      var byStr = data.last_updated_by ? (" bởi " + data.last_updated_by) : "";
+      updateBadge.textContent = "Cập nhật gần nhất: " + timeStr + byStr;
+    }
+
+    var appVersionBadge = document.getElementById("settings-meta-version");
+    if (appVersionBadge) {
+      appVersionBadge.textContent = "v" + (data.app_version || "1.0.0");
+    }
+
+    var companyPreview = document.getElementById("settings-company-preview-name");
+    if (companyPreview) {
+      companyPreview.textContent = (data.settings && data.settings.COMPANY_NAME) || "Đơn vị Triển khai Ứng dụng";
+    }
+  },
+
+  handleSubmit: function(event) {
+    if (event && event.preventDefault) event.preventDefault();
+
+    var self = this;
+    if (self.state.isSaving || self.state.isLoading) return;
+
+    var token = (typeof APP !== "undefined" && APP.token) || localStorage.getItem("sp_token");
+    if (!token) {
+      if (typeof APP !== "undefined" && APP.showToast) {
+        APP.showToast("Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.", "error");
+      }
+      return;
+    }
+
+    var companyName = this.getInputValue("setting-company-name").trim();
+    if (!companyName) {
+      if (typeof APP !== "undefined" && APP.showToast) {
+        APP.showToast("Tên doanh nghiệp / đơn vị vận hành không được để trống.", "warning");
+      }
+      this.switchTab("company");
+      var nameInput = document.getElementById("setting-company-name");
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    var payload = {
+      COMPANY_NAME: companyName,
+      COMPANY_TAX_CODE: this.getInputValue("setting-company-tax-code").trim(),
+      COMPANY_PHONE: this.getInputValue("setting-company-phone").trim(),
+      COMPANY_EMAIL: this.getInputValue("setting-company-email").trim(),
+      COMPANY_ADDRESS: this.getInputValue("setting-company-address").trim(),
+      COMPANY_WEBSITE: this.getInputValue("setting-company-website").trim(),
+      PRINT_HEADER_TITLE: this.getInputValue("setting-print-header").trim(),
+      PRINT_FOOTER_NOTE: this.getInputValue("setting-print-footer").trim(),
+      DATE_FORMAT: this.getInputValue("setting-date-format").trim() || "dd/MM/yyyy",
+      CURRENCY_SYMBOL: this.getInputValue("setting-currency-symbol").trim() || "VNĐ",
+      TIMEZONE: this.getInputValue("setting-timezone").trim() || "Asia/Ho_Chi_Minh"
+    };
+
+    // Thu thập thêm toàn bộ các tham số mở rộng động
+    var dynInputs = document.querySelectorAll(".dynamic-config-input");
+    dynInputs.forEach(function(el) {
+      var k = el.getAttribute("data-dynamic-config-key");
+      if (k) payload[k] = String(el.value || "").trim();
+    });
+
+    self.setSavingState(true);
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        self.setSavingState(false);
+        if (!response || !response.success) {
+          var errMsg = (response && response.message) || "Không thể lưu cấu hình hệ thống.";
+          if (typeof APP !== "undefined" && APP.showToast) {
+            APP.showToast(errMsg, "error");
+          }
+          return;
+        }
+
+        var resData = response.data || {};
+        self.state.settings = Object.assign({}, self.state.settings, payload);
+        self.state.initialSettings = Object.assign({}, self.state.settings);
+        self.state.lastUpdatedAt = resData.updated_at || "";
+
+        if (typeof APP !== "undefined" && APP.showToast) {
+          APP.showToast("Đã lưu thành công cấu hình hệ thống!", "success");
+        }
+
+        self.updateMetaDisplay({
+          settings: self.state.settings,
+          last_updated_at: resData.updated_at,
+          last_updated_by: (APP.currentUser && (APP.currentUser.full_name || APP.currentUser.username)) || "Bạn",
+          app_version: self.state.appVersion
+        });
+      })
+      .withFailureHandler(function(error) {
+        self.setSavingState(false);
+        var errText = (error && error.message) || "Lỗi lưu cấu hình trên máy chủ Google Apps Script.";
+        if (typeof APP !== "undefined" && APP.showToast) {
+          APP.showToast(errText, "error");
+        }
+      })
+      .apiSaveAppSettings(token, payload);
+  },
+
+  resetForm: function() {
+    if (Object.keys(this.state.initialSettings).length === 0) return;
+    this.fillFormData(this.state.initialSettings);
+    this.renderDynamicBusinessParams(this.state.list, this.state.initialSettings);
+    if (typeof APP !== "undefined" && APP.showToast) {
+      APP.showToast("Đã khôi phục các giá trị ban đầu trước khi sửa.", "info");
+    }
+  },
+
+  openConfigDefModal: function() {
+    var modal = document.getElementById("modal-config-def");
+    var form = document.getElementById("form-config-def");
+    if (form) form.reset();
+    if (modal) modal.classList.add("open");
+    var keyInput = document.getElementById("cfg-def-key");
+    if (keyInput) keyInput.focus();
+  },
+
+  closeConfigDefModal: function() {
+    var modal = document.getElementById("modal-config-def");
+    if (modal) modal.classList.remove("open");
+  },
+
+  submitConfigDef: function(event) {
+    if (event && event.preventDefault) event.preventDefault();
+    var self = this;
+    var token = (typeof APP !== "undefined" && APP.token) || localStorage.getItem("sp_token");
+    if (!token) return;
+
+    var key = this.getInputValue("cfg-def-key").trim().toUpperCase();
+    var label = this.getInputValue("cfg-def-label").trim();
+    var dataType = this.getInputValue("cfg-def-type").trim() || "STRING";
+    var val = this.getInputValue("cfg-def-value").trim();
+    var opts = this.getInputValue("cfg-def-options").trim();
+    var isPub = this.getInputValue("cfg-def-public") || "FALSE";
+    var desc = this.getInputValue("cfg-def-desc").trim();
+
+    if (!key || !label) {
+      APP.showToast("Vui lòng nhập đầy đủ Mã tham số (Key) và Nhãn hiển thị.", "warning");
+      return;
+    }
+
+    var btn = document.getElementById("btn-submit-cfg-def");
+    if (btn) btn.disabled = true;
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (btn) btn.disabled = false;
+        if (res && res.success) {
+          APP.showToast(res.message || "Đã thêm tham số cấu hình động!", "success");
+          self.closeConfigDefModal();
+          self.loadSettings(false);
+          self.switchTab("business");
+        } else {
+          APP.showToast((res && res.message) || "Không thể lưu tham số.", "error");
+        }
+      })
+      .withFailureHandler(function(err) {
+        if (btn) btn.disabled = false;
+        APP.showToast("Lỗi máy chủ: " + (err && err.message ? err.message : err), "error");
+      })
+      .apiUpsertConfigDef(token, {
+        key: key,
+        label: label,
+        group_name: "business",
+        data_type: dataType,
+        value: val,
+        options_json: opts,
+        is_public: isPub,
+        description: desc
+      });
+  },
+
+  setLoadingState: function(loading) {
+    this.state.isLoading = loading;
+    if (!loading && typeof APP !== "undefined" && APP.stopPageLoading) {
+      APP.stopPageLoading();
+    }
+    var overlay = document.getElementById("settings-loading-overlay");
+    var saveBtn = document.getElementById("btn-save-settings");
+    var reloadBtn = document.getElementById("btn-reload-settings");
+
+    if (overlay) overlay.style.display = loading ? "flex" : "none";
+    if (saveBtn) saveBtn.disabled = loading;
+    if (reloadBtn) {
+      reloadBtn.disabled = loading;
+      if (loading) reloadBtn.classList.add("btn-loading");
+      else reloadBtn.classList.remove("btn-loading");
+    }
+  },
+
+  setSavingState: function(saving) {
+    this.state.isSaving = saving;
+    var saveBtn = document.getElementById("btn-save-settings");
+    var saveBtnText = document.getElementById("btn-save-settings-text");
+    var resetBtn = document.getElementById("btn-reset-settings");
+
+    if (saveBtn) {
+      saveBtn.disabled = saving;
+      if (saving) {
+        saveBtn.classList.add("btn-loading");
+        if (saveBtnText) saveBtnText.textContent = "Đang lưu cấu hình...";
+      } else {
+        saveBtn.classList.remove("btn-loading");
+        if (saveBtnText) saveBtnText.textContent = "Lưu thay đổi";
+      }
+    }
+    if (resetBtn) resetBtn.disabled = saving;
+  },
+
+  getInputValue: function(elementId) {
+    var el = document.getElementById(elementId);
+    return el ? el.value : "";
+  },
+
+  setInputValue: function(elementId, value) {
+    var el = document.getElementById(elementId);
+    if (el) el.value = value;
+  },
+
+  clearCache: function() {
+    if (typeof APP !== "undefined" && APP.promptClearCache) {
+      APP.promptClearCache();
+    }
+  }
+};
+</script>

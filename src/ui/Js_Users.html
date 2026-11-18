@@ -1,0 +1,1053 @@
+<script>
+  /**
+   * Js_Users.html
+   * Giao diện và tương tác Client cho phân hệ Quản lý Tài khoản Người dùng.
+   * Dự án: Base AppScript Framework
+   */
+
+  var USERS_CLIENT = {
+    users: [],
+    roles: [],
+    DEFAULT_ROLES: [
+      { id: "ROLE_ADMIN", code: "Admin", name: "Quản trị viên toàn quyền", description: "Có toàn bộ quyền hạn trên hệ thống và không thể bị tước quyền." },
+      { id: "ROLE_MANAGER", code: "Manager", name: "Quản lý nghiệp vụ", description: "Quản lý các phân hệ nghiệp vụ, nhân sự và cấu hình." },
+      { id: "ROLE_STAFF", code: "Staff", name: "Nhân viên tác nghiệp", description: "Nhân viên thực hiện thao tác nghiệp vụ cơ bản." }
+    ],
+    isLoading: false,
+    searchTimeout: null,
+    currentPage: 1,
+    pageSize: 10,
+    pagination: null,
+    currentFilters: {
+      keyword: "",
+      roleCode: "",
+      status: ""
+    },
+
+    /**
+     * Khởi tạo phân hệ Người dùng khi người dùng mở view
+     */
+    init: function() {
+      if (this.isLoaded) return;
+      this.bindEvents();
+      this.loadUsers();
+    },
+
+    /**
+     * Gắn sự kiện cho Toolbar (Tìm kiếm, Lọc vai trò, Trạng thái)
+     */
+    bindEvents: function() {
+      var self = this;
+
+      // Tìm kiếm với debounce 300ms
+      var searchInput = document.getElementById("users-search-input");
+      if (searchInput && !searchInput.dataset.bound) {
+        searchInput.dataset.bound = "true";
+        searchInput.addEventListener("input", function() {
+          clearTimeout(self.searchTimeout);
+          var val = this.value;
+          self.searchTimeout = setTimeout(function() {
+            self.currentFilters.keyword = val;
+            self.currentPage = 1;
+            self.loadUsers();
+          }, 300);
+        });
+      }
+
+      // Bộ lọc vai trò
+      var roleSelect = document.getElementById("users-filter-role");
+      if (roleSelect && !roleSelect.dataset.bound) {
+        roleSelect.dataset.bound = "true";
+        roleSelect.addEventListener("change", function() {
+          self.currentFilters.roleCode = this.value;
+          self.currentPage = 1;
+          self.loadUsers();
+        });
+      }
+
+      // Bộ lọc trạng thái
+      var statusSelect = document.getElementById("users-filter-status");
+      if (statusSelect && !statusSelect.dataset.bound) {
+        statusSelect.dataset.bound = "true";
+        statusSelect.addEventListener("change", function() {
+          self.currentFilters.status = this.value;
+          self.currentPage = 1;
+          self.loadUsers();
+        });
+      }
+    },
+
+    /**
+     * Tải danh sách người dùng từ Google Apps Script Backend
+     */
+    loadUsers: function() {
+      var self = this;
+      var token = APP.token;
+      if (!token) {
+        var session = APP.getSession();
+        if (session && session.token) {
+          token = session.token;
+          APP.token = token;
+        }
+      }
+      if (!token) {
+        APP.showToast("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "info");
+        APP.switchView("auth");
+        return;
+      }
+
+      this.isLoading = true;
+      var loadingEl = document.getElementById("users-table-loading");
+      var tbody = document.getElementById("users-table-tbody");
+      var emptyEl = document.getElementById("users-table-empty");
+      var mobileContainer = document.getElementById("users-cards-mobile");
+
+      if (loadingEl) loadingEl.style.display = "flex";
+      if (tbody) tbody.innerHTML = "";
+      if (emptyEl) emptyEl.style.display = "none";
+      if (mobileContainer) mobileContainer.innerHTML = "";
+
+      if (typeof google === "undefined" || !google.script || !google.script.run) {
+        if (loadingEl) loadingEl.style.display = "none";
+        console.warn("Môi trường Apps Script không khả dụng.");
+        return;
+      }
+
+      var filtersPayload = {
+        keyword: String(self.currentFilters.keyword || "").trim(),
+        roleCode: String(self.currentFilters.roleCode || "").trim(),
+        status: String(self.currentFilters.status || "").trim()
+      };
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (typeof APP !== "undefined" && APP.stopPageLoading) APP.stopPageLoading();
+          self.isLoading = false;
+          if (loadingEl) loadingEl.style.display = "none";
+
+          if (typeof response === "string") {
+            try { response = JSON.parse(response); } catch (e) {}
+          }
+
+          if (response && response.success && response.data) {
+            self.isLoaded = true;
+            self.users = response.data.users || [];
+            self.roles = response.data.roles || [];
+            self.pagination = response.data.pagination || {
+              page: self.currentPage,
+              pageSize: self.pageSize,
+              total: response.data.total || self.users.length,
+              totalPages: Math.ceil((response.data.total || self.users.length) / self.pageSize) || 1,
+              startIndex: self.users.length === 0 ? 0 : (self.currentPage - 1) * self.pageSize + 1,
+              endIndex: Math.min(self.currentPage * self.pageSize, response.data.total || self.users.length),
+              hasNext: false,
+              hasPrev: false
+            };
+
+            // Cập nhật bộ đếm
+            var countBadge = document.getElementById("users-count-badge");
+            if (countBadge) {
+              countBadge.textContent = (self.pagination.total || self.users.length) + " tài khoản";
+            }
+
+            // Điền danh sách vai trò vào dropdown lọc nếu chưa có
+            self.populateRoleFilter(self.roles);
+
+            // Hiển thị dữ liệu lên bảng & danh sách mobile
+            if (self.users.length === 0) {
+              if (emptyEl) emptyEl.style.display = "block";
+              var pEl = document.getElementById("users-pagination");
+              if (pEl) pEl.style.display = "none";
+            } else {
+              self.renderTable(self.users);
+              self.renderMobileCards(self.users);
+
+              // Render thanh điều hướng phân trang chuẩn
+              APP.renderPagination("users-pagination", self.pagination, function(newPage, newSize) {
+                self.currentPage = newPage;
+                self.pageSize = newSize;
+                self.loadUsers();
+              });
+            }
+          } else {
+            console.error("apiGetUsersList response error:", response);
+            var msg = (response && response.message) ? response.message : "Không thể tải danh sách tài khoản. Vui lòng thử lại.";
+            APP.showToast(msg, "error");
+            if (response && (response.errorCode === "AUTH_FORBIDDEN" || (response.message && (response.message.indexOf("Phiên làm việc") !== -1 || response.message.indexOf("hết hạn") !== -1)))) {
+              setTimeout(function() {
+                APP.clearSession();
+                APP.switchView("auth");
+              }, 1200);
+            }
+            if (emptyEl) emptyEl.style.display = "block";
+            var pEl2 = document.getElementById("users-pagination");
+            if (pEl2) pEl2.style.display = "none";
+          }
+        })
+        .withFailureHandler(function(err) {
+          self.isLoading = false;
+          if (loadingEl) loadingEl.style.display = "none";
+          var errMsg = err ? (err.message || String(err)) : "Không xác định";
+          if (typeof APP !== "undefined" && APP.stopPageLoading) APP.stopPageLoading();
+          console.error("apiGetUsersList RPC failure:", err);
+          APP.showToast("Lỗi kết nối máy chủ: " + errMsg, "error");
+          if (emptyEl) emptyEl.style.display = "block";
+          var pEl3 = document.getElementById("users-pagination");
+          if (pEl3) pEl3.style.display = "none";
+        })
+        .apiGetUsersList(token, filtersPayload, self.currentPage, self.pageSize);
+    },
+
+    /**
+     * Cập nhật danh sách Vai trò vào Dropdown Bộ lọc
+     */
+    populateRoleFilter: function(roles) {
+      var select = document.getElementById("users-filter-role");
+      if (!select || select.options.length > 1) return;
+
+      var rolesToRender = (roles && roles.length > 0) ? roles : this.DEFAULT_ROLES;
+      rolesToRender.forEach(function(r) {
+        var opt = document.createElement("option");
+        opt.value = r.code;
+        opt.textContent = r.name;
+        select.appendChild(opt);
+      });
+    },
+
+    /**
+     * Lấy class màu tương ứng với vai trò
+     */
+    getRoleBadgeClass: function(roleCode) {
+      switch (roleCode) {
+        case "Admin": return "role-admin";
+        case "Manager": return "role-production";
+        case "Staff": return "role-sales";
+        default: return "role-default";
+      }
+    },
+
+    /**
+     * Lấy class màu ngẫu nhiên cho Avatar
+     */
+    getAvatarClass: function(index) {
+      var classes = ["", "avatar-alt-1", "avatar-alt-2", "avatar-alt-3", "avatar-alt-4", "avatar-alt-5"];
+      return classes[index % classes.length];
+    },
+
+    /**
+     * Hiển thị bảng dữ liệu (Desktop & Tablet)
+     */
+    renderTable: function(users) {
+      var tbody = document.getElementById("users-table-tbody");
+      if (!tbody) return;
+
+      var self = this;
+      var html = "";
+
+      users.forEach(function(u, idx) {
+        var initial = (u.full_name || u.username || "U").charAt(0).toUpperCase();
+        var avatarClass = self.getAvatarClass(idx);
+        var isLocked = (u.status === "LOCKED" || u.status === "Đã khóa");
+
+        // Vai trò tags
+        var rolesHtml = "";
+        if (u.roles && u.roles.length > 0) {
+          rolesHtml = '<div class="role-tags">' + u.roles.map(function(r) {
+            return '<span class="role-badge ' + self.getRoleBadgeClass(r.code) + '">' + self.escapeHtml(r.name) + '</span>';
+          }).join("") + '</div>';
+        } else {
+          rolesHtml = '<span style="color: #94a3b8; font-style: italic;">Chưa gán vai trò</span>';
+        }
+
+        // Trạng thái pill
+        var statusHtml = isLocked
+          ? '<span class="status-pill status-locked"><span class="status-pill-dot"></span>Đã khóa</span>'
+          : '<span class="status-pill status-active"><span class="status-pill-dot"></span>Hoạt động</span>';
+
+        // Root Admin Tag
+        var rootTag = u.is_root_admin
+          ? '<span class="badge-root-tag" title="Tài khoản quản trị viên gốc của hệ thống">ROOT</span>'
+          : '';
+
+        // Nút Khóa / Mở khóa
+        var lockActionBtn = "";
+        if (u.is_root_admin) {
+          lockActionBtn = '<button type="button" class="btn-icon-action" disabled title="Tài khoản gốc hệ thống không thể khóa">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+            '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></button>';
+        } else if (isLocked) {
+          lockActionBtn = '<button type="button" class="btn-icon-action btn-action-unlock" title="Mở khóa tài khoản" onclick="USERS_CLIENT.openLockModal(\'' + u.id + '\')">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+            '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg></button>';
+        } else {
+          lockActionBtn = '<button type="button" class="btn-icon-action btn-action-lock" title="Khóa tài khoản" onclick="USERS_CLIENT.openLockModal(\'' + u.id + '\')">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+            '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></button>';
+        }
+
+        html += '<tr>' +
+          '<td>' +
+            '<div class="user-cell">' +
+              '<div class="user-avatar-circle ' + avatarClass + '">' + initial + '</div>' +
+              '<div class="user-names">' +
+                '<span class="user-fullname">' + self.escapeHtml(u.full_name) + ' ' + rootTag + '</span>' +
+                '<span class="user-username">@' + self.escapeHtml(u.username) + ' • ' + u.id + '</span>' +
+              '</div>' +
+            '</div>' +
+          '</td>' +
+          '<td>' +
+            '<div style="display: flex; flex-direction: column; gap: 2px;">' +
+              (u.phone ? '<span style="font-weight: 500;">' + self.escapeHtml(u.phone) + '</span>' : '<span style="color: #94a3b8;">Chưa có SĐT</span>') +
+              (u.email ? '<span style="font-size: 12px; color: #64748b;">' + self.escapeHtml(u.email) + '</span>' : '') +
+            '</div>' +
+          '</td>' +
+          '<td>' + rolesHtml +
+            (u.menu_override_count > 0 ? '<div style="margin-top:4px;"><span style="font-size:11px;padding:2px 7px;border-radius:999px;background:#eef2ff;color:#4338ca;font-weight:600;">Menu riêng: ' + u.menu_override_count + '</span></div>' : '') +
+          '</td>' +
+          '<td>' + statusHtml + '</td>' +
+          '<td style="text-align: right;">' +
+            '<div class="btn-action-group">' +
+              (u.is_root_admin ? '' :
+                '<button type="button" class="btn-icon-action" title="Phân quyền Menu cá nhân (GRANT / DENY)" onclick="USERS_CLIENT.openUserMenusModal(\'' + u.id + '\')">' +
+                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                  '<line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>' +
+                '</button>'
+              ) +
+              '<button type="button" class="btn-icon-action btn-action-edit" title="Chỉnh sửa tài khoản" onclick="USERS_CLIENT.openEditModal(\'' + u.id + '\')">' +
+                '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>' +
+                '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>' +
+              '</button>' +
+              '<button type="button" class="btn-icon-action btn-action-key" title="Đặt lại mật khẩu" onclick="USERS_CLIENT.openResetPasswordModal(\'' + u.id + '\')">' +
+                '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<path d="M21 2l-2 2m-1.5 1.5L12 11l-4-4-5 5a2 2 0 0 0 0 2.83l3.17 3.17a2 2 0 0 0 2.83 0L19 7.5"></path>' +
+                '<circle cx="15.5" cy="8.5" r="2.5"></circle></svg>' +
+              '</button>' +
+              lockActionBtn +
+            '</div>' +
+          '</td>' +
+        '</tr>';
+      });
+
+      tbody.innerHTML = html;
+    },
+
+    /**
+     * Hiển thị danh sách card cho Mobile (khi màn hình nhỏ)
+     */
+    renderMobileCards: function(users) {
+      var container = document.getElementById("users-cards-mobile");
+      if (!container) return;
+
+      var self = this;
+      var html = "";
+
+      users.forEach(function(u, idx) {
+        var initial = (u.full_name || u.username || "U").charAt(0).toUpperCase();
+        var avatarClass = self.getAvatarClass(idx);
+        var isLocked = (u.status === "LOCKED" || u.status === "Đã khóa");
+
+        var rolesHtml = (u.roles && u.roles.length > 0)
+          ? u.roles.map(function(r) {
+              return '<span class="role-badge ' + self.getRoleBadgeClass(r.code) + '">' + self.escapeHtml(r.name) + '</span>';
+            }).join(" ")
+          : '<span style="color: #94a3b8;">Chưa gán vai trò</span>';
+
+        var statusHtml = isLocked
+          ? '<span class="status-pill status-locked"><span class="status-pill-dot"></span>Đã khóa</span>'
+          : '<span class="status-pill status-active"><span class="status-pill-dot"></span>Hoạt động</span>';
+
+        html += '<div class="mobile-user-card">' +
+          '<div class="mobile-user-card-header">' +
+            '<div class="user-cell">' +
+              '<div class="user-avatar-circle ' + avatarClass + '">' + initial + '</div>' +
+              '<div class="user-names">' +
+                '<span class="user-fullname">' + self.escapeHtml(u.full_name) + '</span>' +
+                '<span class="user-username">@' + self.escapeHtml(u.username) + ' (' + u.id + ')</span>' +
+              '</div>' +
+            '</div>' +
+            statusHtml +
+          '</div>' +
+          '<div class="mobile-user-card-body">' +
+            '<div><strong>Liên hệ:</strong> ' + (u.phone || "---") + (u.email ? ' • ' + u.email : '') + '</div>' +
+            '<div><strong>Vai trò:</strong> <div style="margin-top: 4px;">' + rolesHtml + '</div></div>' +
+          '</div>' +
+          '<div class="mobile-user-card-footer">' +
+            '<span style="font-size: 11px; color: #94a3b8;">' + (u.is_root_admin ? 'Tài khoản gốc hệ thống' : 'Người dùng hệ thống') + '</span>' +
+            '<div class="btn-action-group">' +
+              '<button type="button" class="btn-icon-action btn-action-edit" title="Sửa" onclick="USERS_CLIENT.openEditModal(\'' + u.id + '\')">' +
+                '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>' +
+                '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>' +
+              '</button>' +
+              '<button type="button" class="btn-icon-action btn-action-key" title="Mật khẩu" onclick="USERS_CLIENT.openResetPasswordModal(\'' + u.id + '\')">' +
+                '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<path d="M21 2l-2 2m-1.5 1.5L12 11l-4-4-5 5a2 2 0 0 0 0 2.83l3.17 3.17a2 2 0 0 0 2.83 0L19 7.5"></path>' +
+                '<circle cx="15.5" cy="8.5" r="2.5"></circle></svg>' +
+              '</button>' +
+              (u.is_root_admin ? '' : (
+                isLocked
+                  ? '<button type="button" class="btn-icon-action btn-action-unlock" title="Mở khóa" onclick="USERS_CLIENT.openLockModal(\'' + u.id + '\')">' +
+                      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                      '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg></button>'
+                  : '<button type="button" class="btn-icon-action btn-action-lock" title="Khóa" onclick="USERS_CLIENT.openLockModal(\'' + u.id + '\')">' +
+                      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                      '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></button>'
+              )) +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      });
+
+      container.innerHTML = html;
+    },
+
+    /**
+     * Mở Modal Thêm mới Tài khoản
+     */
+    openCreateModal: function() {
+      var modal = document.getElementById("modal-user-form");
+      var title = document.getElementById("modal-user-title");
+      var subtitle = document.getElementById("modal-user-subtitle");
+      var alertBox = document.getElementById("user-form-alert");
+      var idInput = document.getElementById("user-id");
+      var usernameInput = document.getElementById("user-username");
+      var passwordInput = document.getElementById("user-password");
+      var pwGroup = document.getElementById("group-password");
+      var fullnameInput = document.getElementById("user-fullname");
+      var phoneInput = document.getElementById("user-phone");
+      var emailInput = document.getElementById("user-email");
+      var btnText = document.getElementById("btn-save-user-text");
+
+      if (title) title.textContent = "Thêm tài khoản mới";
+      if (subtitle) subtitle.textContent = "Tạo tài khoản nhân sự và phân quyền vai trò";
+      if (btnText) btnText.textContent = "Lưu tài khoản";
+      if (alertBox) {
+        alertBox.textContent = "";
+        alertBox.style.display = "none";
+      }
+
+      if (idInput) idInput.value = "";
+      if (usernameInput) {
+        usernameInput.value = "";
+        usernameInput.disabled = false;
+      }
+      if (passwordInput) {
+        passwordInput.value = "";
+        passwordInput.required = true;
+      }
+      if (pwGroup) pwGroup.style.display = "block";
+      if (fullnameInput) fullnameInput.value = "";
+      if (phoneInput) phoneInput.value = "";
+      if (emailInput) emailInput.value = "";
+
+      // Hiển thị danh sách vai trò
+      this.renderRoleCheckboxes([]);
+
+      if (modal) modal.classList.add("open");
+      if (usernameInput) usernameInput.focus();
+    },
+
+    /**
+     * Mở Modal Chỉnh sửa Tài khoản
+     */
+    openEditModal: function(userId) {
+      var user = this.users.find(function(u) { return u.id === userId; });
+      if (!user) {
+        APP.showToast("Không tìm thấy thông tin tài khoản.", "error");
+        return;
+      }
+
+      var modal = document.getElementById("modal-user-form");
+      var title = document.getElementById("modal-user-title");
+      var subtitle = document.getElementById("modal-user-subtitle");
+      var alertBox = document.getElementById("user-form-alert");
+      var idInput = document.getElementById("user-id");
+      var usernameInput = document.getElementById("user-username");
+      var passwordInput = document.getElementById("user-password");
+      var pwGroup = document.getElementById("group-password");
+      var fullnameInput = document.getElementById("user-fullname");
+      var phoneInput = document.getElementById("user-phone");
+      var emailInput = document.getElementById("user-email");
+      var btnText = document.getElementById("btn-save-user-text");
+
+      if (title) title.textContent = "Chỉnh sửa tài khoản";
+      if (subtitle) subtitle.textContent = "Cập nhật thông tin cho @" + user.username + " (" + user.id + ")";
+      if (btnText) btnText.textContent = "Lưu thay đổi";
+      if (alertBox) {
+        alertBox.textContent = "";
+        alertBox.style.display = "none";
+      }
+
+      if (idInput) idInput.value = user.id;
+      if (usernameInput) {
+        usernameInput.value = user.username;
+        usernameInput.disabled = true; // Không cho sửa username
+      }
+      if (passwordInput) {
+        passwordInput.value = "";
+        passwordInput.required = false;
+      }
+      if (pwGroup) pwGroup.style.display = "none"; // Ẩn mật khẩu khi sửa (dùng modal reset riêng)
+
+      if (fullnameInput) fullnameInput.value = user.full_name || "";
+      if (phoneInput) phoneInput.value = user.phone || "";
+      if (emailInput) emailInput.value = user.email || "";
+
+      // Check các vai trò hiện tại của user
+      var currentRoleIds = (user.roles || []).map(function(r) { return r.id; });
+      this.renderRoleCheckboxes(currentRoleIds, user.is_root_admin);
+
+      if (modal) modal.classList.add("open");
+      if (fullnameInput) fullnameInput.focus();
+    },
+
+    /**
+     * Hiển thị danh sách Checkboxes chọn Vai trò
+     */
+    renderRoleCheckboxes: function(selectedRoleIds, isRootAdmin) {
+      var container = document.getElementById("user-roles-selection");
+      if (!container) return;
+
+      var self = this;
+      var html = "";
+
+      var rolesToRender = (this.roles && this.roles.length > 0) ? this.roles : this.DEFAULT_ROLES;
+      rolesToRender.forEach(function(r) {
+        var isChecked = selectedRoleIds.indexOf(r.id) !== -1;
+        var isDisabled = (isRootAdmin && r.code === "Admin"); // Root admin bắt buộc có vai trò Admin
+
+        html += '<label class="role-option-card ' + (isChecked ? 'selected' : '') + '">' +
+          '<input type="checkbox" name="user_roles" value="' + r.id + '" ' +
+            (isChecked ? 'checked' : '') + ' ' + (isDisabled ? 'disabled data-locked="true"' : '') +
+            ' onchange="USERS_CLIENT.toggleRoleCard(this)">' +
+          '<div class="role-option-info">' +
+            '<span class="role-option-title">' + self.escapeHtml(r.name) + '</span>' +
+            '<span class="role-option-desc">' + self.escapeHtml(r.description || r.code) + '</span>' +
+          '</div>' +
+        '</label>';
+      });
+
+      container.innerHTML = html;
+    },
+
+    /**
+     * Highlight card checkbox khi người dùng click
+     */
+    toggleRoleCard: function(inputEl) {
+      var card = inputEl.closest(".role-option-card");
+      if (!card) return;
+      if (inputEl.checked) {
+        card.classList.add("selected");
+      } else {
+        card.classList.remove("selected");
+      }
+    },
+
+    /**
+     * Đóng modal người dùng
+     */
+    closeUserModal: function() {
+      var modal = document.getElementById("modal-user-form");
+      if (modal) modal.classList.remove("open");
+    },
+
+    /**
+     * Xử lý Submit Form Thêm mới / Cập nhật
+     */
+    submitForm: function() {
+      var self = this;
+      var alertBox = document.getElementById("user-form-alert");
+      var rolesError = document.getElementById("user-roles-error");
+      var saveBtn = document.getElementById("btn-save-user");
+      var saveBtnText = document.getElementById("btn-save-user-text");
+
+      if (alertBox) {
+        alertBox.textContent = "";
+        alertBox.style.display = "none";
+      }
+      if (rolesError) rolesError.style.display = "none";
+
+      var id = (document.getElementById("user-id").value || "").trim();
+      var username = (document.getElementById("user-username").value || "").trim().toLowerCase();
+      var password = (document.getElementById("user-password").value || "");
+      var fullName = (document.getElementById("user-fullname").value || "").trim();
+      var phone = (document.getElementById("user-phone").value || "").trim();
+      var email = (document.getElementById("user-email").value || "").trim().toLowerCase();
+
+      // Thu thập các role_id được chọn
+      var roleCheckboxes = document.querySelectorAll('input[name="user_roles"]:checked');
+      var roleIds = [];
+      roleCheckboxes.forEach(function(cb) {
+        roleIds.push(cb.value);
+      });
+
+      // Nếu sửa root admin, luôn đảm bảo role Admin có trong danh sách
+      var adminRole = this.roles.find(function(r) { return r.code === "Admin"; });
+      if (adminRole) {
+        var lockedCb = document.querySelector('input[name="user_roles"][data-locked="true"]');
+        if (lockedCb && roleIds.indexOf(adminRole.id) === -1) {
+          roleIds.push(adminRole.id);
+        }
+      }
+
+      var isCreate = !id;
+
+      // Validation Client
+      if (isCreate) {
+        var usernameRegex = /^[a-z0-9_]{4,30}$/;
+        if (!usernameRegex.test(username)) {
+          this.showFormError("Tên đăng nhập phải từ 4-30 ký tự, chỉ gồm chữ thường, chữ số và dấu gạch dưới (_).");
+          return;
+        }
+
+        if (password.length < 6) {
+          this.showFormError("Mật khẩu khởi tạo phải có ít nhất 6 ký tự.");
+          return;
+        }
+      }
+
+      if (!fullName) {
+        this.showFormError("Vui lòng nhập họ và tên nhân viên.");
+        return;
+      }
+
+      if (roleIds.length === 0) {
+        if (rolesError) rolesError.style.display = "block";
+        this.showFormError("Vui lòng chọn ít nhất một vai trò cho tài khoản.");
+        return;
+      }
+
+      var payload = {
+        id: id,
+        username: username,
+        password: password,
+        full_name: fullName,
+        phone: phone,
+        email: email,
+        role_ids: roleIds
+      };
+
+      // Đặt trạng thái loading cho nút Lưu
+      if (saveBtn) saveBtn.disabled = true;
+      if (saveBtnText) saveBtnText.textContent = "Đang lưu dữ liệu...";
+
+      var token = APP.token;
+
+      if (isCreate) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            if (saveBtn) saveBtn.disabled = false;
+            if (saveBtnText) saveBtnText.textContent = "Lưu tài khoản";
+
+            if (response && response.success) {
+              APP.showToast(response.message || "Tạo tài khoản thành công!", "success");
+              self.closeUserModal();
+              self.loadUsers();
+            } else {
+              self.showFormError(response ? response.message : "Không thể tạo tài khoản.");
+            }
+          })
+          .withFailureHandler(function(err) {
+            if (saveBtn) saveBtn.disabled = false;
+            if (saveBtnText) saveBtnText.textContent = "Lưu tài khoản";
+            self.showFormError("Lỗi kết nối máy chủ: " + err.message);
+          })
+          .apiCreateUser(token, payload);
+      } else {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            if (saveBtn) saveBtn.disabled = false;
+            if (saveBtnText) saveBtnText.textContent = "Lưu thay đổi";
+
+            if (response && response.success) {
+              APP.showToast(response.message || "Cập nhật tài khoản thành công!", "success");
+              self.closeUserModal();
+              self.loadUsers();
+            } else {
+              self.showFormError(response ? response.message : "Không thể cập nhật tài khoản.");
+            }
+          })
+          .withFailureHandler(function(err) {
+            if (saveBtn) saveBtn.disabled = false;
+            if (saveBtnText) saveBtnText.textContent = "Lưu thay đổi";
+            self.showFormError("Lỗi kết nối máy chủ: " + err.message);
+          })
+          .apiUpdateUser(token, payload);
+      }
+    },
+
+    /**
+     * Hiển thị thông báo lỗi trên Form
+     */
+    showFormError: function(msg) {
+      var alertBox = document.getElementById("user-form-alert");
+      if (alertBox) {
+        alertBox.textContent = msg;
+        alertBox.style.display = "block";
+      }
+      APP.showToast(msg, "error");
+    },
+
+    /**
+     * Mở Modal Đặt lại Mật khẩu
+     */
+    openResetPasswordModal: function(userId) {
+      var user = this.users.find(function(u) { return u.id === userId; });
+      if (!user) return;
+
+      var modal = document.getElementById("modal-reset-password");
+      var subtitle = document.getElementById("reset-pw-subtitle");
+      var idInput = document.getElementById("reset-pw-user-id");
+      var newPwInput = document.getElementById("reset-new-password");
+      var confirmPwInput = document.getElementById("reset-confirm-password");
+      var alertBox = document.getElementById("reset-pw-alert");
+
+      if (subtitle) subtitle.textContent = "Đặt lại mật khẩu cho @" + user.username + " (" + user.full_name + ")";
+      if (idInput) idInput.value = user.id;
+      if (newPwInput) newPwInput.value = "";
+      if (confirmPwInput) confirmPwInput.value = "";
+      if (alertBox) {
+        alertBox.textContent = "";
+        alertBox.style.display = "none";
+      }
+
+      if (modal) modal.classList.add("open");
+      if (newPwInput) newPwInput.focus();
+    },
+
+    /**
+     * Đóng Modal Đặt lại Mật khẩu
+     */
+    closeResetPasswordModal: function() {
+      var modal = document.getElementById("modal-reset-password");
+      if (modal) modal.classList.remove("open");
+    },
+
+    /**
+     * Submit Đặt lại Mật khẩu
+     */
+    submitResetPassword: function() {
+      var self = this;
+      var id = document.getElementById("reset-pw-user-id").value;
+      var newPw = document.getElementById("reset-new-password").value;
+      var confirmPw = document.getElementById("reset-confirm-password").value;
+      var alertBox = document.getElementById("reset-pw-alert");
+      var btn = document.getElementById("btn-submit-reset-pw");
+      var btnText = document.getElementById("btn-reset-pw-text");
+
+      if (alertBox) {
+        alertBox.textContent = "";
+        alertBox.style.display = "none";
+      }
+
+      if (!newPw || newPw.length < 6) {
+        if (alertBox) {
+          alertBox.textContent = "Mật khẩu mới phải có tối thiểu 6 ký tự.";
+          alertBox.style.display = "block";
+        }
+        return;
+      }
+
+      if (newPw !== confirmPw) {
+        if (alertBox) {
+          alertBox.textContent = "Xác nhận mật khẩu mới không khớp.";
+          alertBox.style.display = "block";
+        }
+        return;
+      }
+
+      if (btn) btn.disabled = true;
+      if (btnText) btnText.textContent = "Đang cập nhật...";
+
+      var token = APP.token;
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (btn) btn.disabled = false;
+          if (btnText) btnText.textContent = "Cập nhật mật khẩu";
+
+          if (response && response.success) {
+            APP.showToast(response.message || "Đặt lại mật khẩu thành công!", "success");
+            self.closeResetPasswordModal();
+          } else {
+            if (alertBox) {
+              alertBox.textContent = response ? response.message : "Không thể đặt lại mật khẩu.";
+              alertBox.style.display = "block";
+            }
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (btn) btn.disabled = false;
+          if (btnText) btnText.textContent = "Cập nhật mật khẩu";
+          if (alertBox) {
+            alertBox.textContent = "Lỗi kết nối: " + err.message;
+            alertBox.style.display = "block";
+          }
+        })
+        .apiResetUserPassword(token, id, newPw);
+    },
+
+    /**
+     * Mở Modal Xác nhận Khóa / Mở khóa
+     */
+    openLockModal: function(userId) {
+      var self = this;
+      var user = this.users.find(function(u) { return u.id === userId; });
+      if (!user) return;
+
+      if (user.is_root_admin) {
+        APP.showToast("Tài khoản quản trị viên gốc không thể bị khóa.", "info");
+        return;
+      }
+
+      var modal = document.getElementById("modal-confirm-lock");
+      var title = document.getElementById("confirm-lock-title");
+      var subtitle = document.getElementById("confirm-lock-subtitle");
+      var msg = document.getElementById("confirm-lock-message");
+      var idInput = document.getElementById("lock-target-user-id");
+      var btn = document.getElementById("btn-submit-lock");
+      var btnText = document.getElementById("btn-lock-text");
+      var icon = document.getElementById("confirm-lock-icon");
+
+      var isLocked = (user.status === "LOCKED" || user.status === "Đã khóa");
+
+      if (idInput) idInput.value = user.id;
+
+      if (isLocked) {
+        if (title) title.textContent = "Mở khóa tài khoản";
+        if (subtitle) subtitle.textContent = "Kích hoạt lại quyền truy cập";
+        if (msg) msg.innerHTML = "Bạn có chắc chắn muốn mở khóa tài khoản <strong>@" + self.escapeHtml(user.username) + "</strong> (" + self.escapeHtml(user.full_name) + ") không?";
+        if (btn) {
+          btn.className = "btn btn-primary";
+          btn.style.background = "#059669";
+          btn.style.borderColor = "#059669";
+        }
+        if (btnText) btnText.textContent = "Xác nhận mở khóa";
+        if (icon) {
+          icon.className = "modal-header-icon";
+          icon.style.background = "#ecfdf5";
+          icon.style.color = "#059669";
+        }
+      } else {
+        if (title) title.textContent = "Khóa tài khoản";
+        if (subtitle) subtitle.textContent = "Tạm dừng quyền truy cập của nhân viên";
+        if (msg) msg.innerHTML = "Bạn có chắc chắn muốn khóa tài khoản <strong>@" + self.escapeHtml(user.username) + "</strong> (" + self.escapeHtml(user.full_name) + ") không? Người dùng sẽ không thể đăng nhập vào hệ thống.";
+        if (btn) {
+          btn.className = "btn btn-primary";
+          btn.style.background = "#dc2626";
+          btn.style.borderColor = "#dc2626";
+        }
+        if (btnText) btnText.textContent = "Xác nhận khóa";
+        if (icon) {
+          icon.className = "modal-header-icon icon-danger";
+          icon.style.background = "#fef2f2";
+          icon.style.color = "#dc2626";
+        }
+      }
+
+      if (modal) modal.classList.add("open");
+    },
+
+    /**
+     * Đóng Modal Xác nhận Khóa / Mở khóa
+     */
+    closeLockModal: function() {
+      var modal = document.getElementById("modal-confirm-lock");
+      if (modal) modal.classList.remove("open");
+    },
+
+    /**
+     * Submit Khóa / Mở khóa Tài khoản
+     */
+    submitToggleLock: function() {
+      var self = this;
+      var id = document.getElementById("lock-target-user-id").value;
+      var btn = document.getElementById("btn-submit-lock");
+      var btnText = document.getElementById("btn-lock-text");
+
+      if (!id) return;
+
+      if (btn) btn.disabled = true;
+      var origText = btnText ? btnText.textContent : "Xác nhận";
+      if (btnText) btnText.textContent = "Đang xử lý...";
+
+      var token = APP.token;
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (btn) btn.disabled = false;
+          if (btnText) btnText.textContent = origText;
+
+          if (response && response.success) {
+            APP.showToast(response.message || "Cập nhật trạng thái thành công!", "success");
+            self.closeLockModal();
+            self.loadUsers();
+          } else {
+            APP.showToast(response ? response.message : "Thao tác không thành công.", "error");
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (btn) btn.disabled = false;
+          if (btnText) btnText.textContent = origText;
+          APP.showToast("Lỗi kết nối: " + err.message, "error");
+        })
+        .apiToggleUserStatus(token, id);
+    },
+
+    /**
+     * Mở Modal Phân quyền Menu Cá nhân (USER_MENUS: INHERIT / GRANT / DENY)
+     */
+    openUserMenusModal: function(userId) {
+      var self = this;
+      var token = APP.token || (window.AUTH && AUTH.getToken());
+      if (!token) return;
+
+      var modal = document.getElementById("modal-user-menus");
+      var targetInput = document.getElementById("user-menus-target-id");
+      var subtitle = document.getElementById("user-menus-subtitle");
+      var loadingEl = document.getElementById("user-menus-loading");
+      var listEl = document.getElementById("user-menus-list-container");
+      var adminNote = document.getElementById("user-menus-admin-note");
+      var saveBtn = document.getElementById("btn-save-user-menus");
+
+      if (targetInput) targetInput.value = userId;
+      if (subtitle) subtitle.textContent = "Đang tải cấu hình menu...";
+      if (listEl) listEl.innerHTML = "";
+      if (adminNote) adminNote.style.display = "none";
+      if (loadingEl) loadingEl.style.display = "flex";
+      if (saveBtn) saveBtn.disabled = true;
+      if (modal) modal.classList.add("open");
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (loadingEl) loadingEl.style.display = "none";
+          if (!response || !response.success || !response.data) {
+            APP.showToast((response && response.message) || "Không thể tải cấu hình menu cá nhân.", "error");
+            self.closeUserMenusModal();
+            return;
+          }
+          var d = response.data;
+          var uInfo = d.user || {};
+          if (subtitle) {
+            var rNames = (uInfo.roles || []).map(function(r) { return r.name; }).join(", ") || "Chưa gán vai trò";
+            subtitle.textContent = "@" + uInfo.username + " (" + uInfo.full_name + ") • Vai trò: " + rNames;
+          }
+          if (uInfo.is_admin_user) {
+            if (adminNote) adminNote.style.display = "block";
+            if (saveBtn) saveBtn.disabled = true;
+          } else {
+            if (saveBtn) saveBtn.disabled = false;
+          }
+          self.renderUserMenusList(d.items || [], !!uInfo.is_admin_user);
+        })
+        .withFailureHandler(function(err) {
+          if (loadingEl) loadingEl.style.display = "none";
+          APP.showToast("Lỗi tải cấu hình menu: " + (err && err.message ? err.message : err), "error");
+        })
+        .apiGetUserMenus(token, userId);
+    },
+
+    renderUserMenusList: function(items, isReadOnly) {
+      var listEl = document.getElementById("user-menus-list-container");
+      if (!listEl) return;
+      var self = this;
+
+      if (!items || items.length === 0) {
+        listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">Chưa có danh mục menu nào.</div>';
+        return;
+      }
+
+      var html = '<table class="data-table"><thead><tr>' +
+        '<th>Mục Menu & Phân nhóm</th>' +
+        '<th style="width: 150px;">Quyền từ Vai trò</th>' +
+        '<th style="width: 220px;">Ghi đè Cá nhân (USER_MENUS)</th>' +
+      '</tr></thead><tbody>';
+
+      items.forEach(function(it) {
+        var roleBadge = it.role_granted
+          ? '<span class="status-pill status-active"><span class="status-pill-dot"></span>Được cấp</span>'
+          : '<span class="status-pill status-locked"><span class="status-pill-dot"></span>Không cấp</span>';
+
+        var eff = it.effect || "INHERIT";
+        html += '<tr>' +
+          '<td>' +
+            '<div style="font-weight:600;color:var(--text-main);">' + self.escapeHtml(it.name) + '</div>' +
+            '<div style="font-size:11.5px;color:var(--text-muted);">' + self.escapeHtml(it.group_name) + ' • <code>' + self.escapeHtml(it.permission_code || it.code) + '</code></div>' +
+          '</td>' +
+          '<td>' + roleBadge + '</td>' +
+          '<td>' +
+            '<select class="form-input user-menu-override-select" data-menu-id="' + self.escapeHtml(it.menu_id) + '" ' + (isReadOnly ? 'disabled' : '') + ' style="height:34px;font-size:12.5px;padding:4px 8px;">' +
+              '<option value="INHERIT" ' + (eff === "INHERIT" ? "selected" : "") + '>Mặc định (Kế thừa Vai trò)</option>' +
+              '<option value="GRANT" ' + (eff === "GRANT" ? "selected" : "") + '>+ Cấp riêng (GRANT)</option>' +
+              '<option value="DENY" ' + (eff === "DENY" ? "selected" : "") + '>- Ẩn cưỡng bức (DENY)</option>' +
+            '</select>' +
+          '</td>' +
+        '</tr>';
+      });
+
+      html += '</tbody></table>';
+      listEl.innerHTML = html;
+    },
+
+    closeUserMenusModal: function() {
+      var modal = document.getElementById("modal-user-menus");
+      if (modal) modal.classList.remove("open");
+    },
+
+    submitUserMenus: function() {
+      var self = this;
+      var token = APP.token || (window.AUTH && AUTH.getToken());
+      var targetInput = document.getElementById("user-menus-target-id");
+      var userId = targetInput ? targetInput.value : "";
+      if (!token || !userId) return;
+
+      var selects = document.querySelectorAll(".user-menu-override-select");
+      var overrides = [];
+      selects.forEach(function(sel) {
+        var mid = sel.getAttribute("data-menu-id");
+        var val = sel.value || "INHERIT";
+        if (mid && (val === "GRANT" || val === "DENY")) {
+          overrides.push({ menu_id: mid, effect: val });
+        }
+      });
+
+      var btn = document.getElementById("btn-save-user-menus");
+      var txt = document.getElementById("btn-save-user-menus-text");
+      if (btn) btn.disabled = true;
+      if (txt) txt.textContent = "Đang lưu...";
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (btn) btn.disabled = false;
+          if (txt) txt.textContent = "Lưu phân quyền Menu";
+          if (response && response.success) {
+            APP.showToast(response.message || "Đã lưu phân quyền Menu cá nhân!", "success");
+            self.closeUserMenusModal();
+            self.loadUsers();
+          } else {
+            APP.showToast((response && response.message) || "Không thể lưu cấu hình.", "error");
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (btn) btn.disabled = false;
+          if (txt) txt.textContent = "Lưu phân quyền Menu";
+          APP.showToast("Lỗi máy chủ: " + (err && err.message ? err.message : err), "error");
+        })
+        .apiSaveUserMenus(token, userId, overrides);
+    },
+
+    /**
+     * Tránh tấn công XSS khi hiển thị dữ liệu nhập từ người dùng
+     */
+    escapeHtml: function(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+  };
+</script>

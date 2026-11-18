@@ -1,0 +1,333 @@
+<script>
+  /**
+   * Js_Auth.html
+   * Xử lý tương tác Form Đăng nhập, Validation client-side, Gọi API Backend và Đăng xuất.
+   * Dự án: Base AppScript Framework
+   */
+
+  var AUTH_CLIENT = {
+    /**
+     * Khởi tạo các sự kiện của Module Auth
+     */
+    init: function() {
+      var loginForm = document.getElementById("login-form");
+      if (loginForm) {
+        loginForm.addEventListener("submit", this.handleLoginSubmit.bind(this));
+      }
+
+      var togglePwdBtn = document.getElementById("toggle-password-btn");
+      if (togglePwdBtn) {
+        togglePwdBtn.addEventListener("click", this.togglePasswordVisibility.bind(this));
+      }
+
+      var logoutBtn = document.getElementById("btn-logout");
+      if (logoutBtn) {
+        logoutBtn.addEventListener("click", this.handleLogout.bind(this));
+      }
+
+      // Đóng dropdown menu tài khoản khi click ra ngoài
+      var self = this;
+      document.addEventListener("click", function(e) {
+        var menu = document.getElementById("header-user-menu");
+        var badge = document.getElementById("header-user-badge");
+        if (menu && badge && !badge.contains(e.target) && !menu.contains(e.target)) {
+          menu.style.display = "none";
+        }
+      });
+
+      // Đóng modal khi bấm phím Escape
+      document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape") {
+          self.closeChangePasswordModal();
+          self.closeUserMenu();
+        }
+      });
+    },
+
+    /**
+     * Chuyển đổi trạng thái ẩn/hiện mật khẩu
+     */
+    togglePasswordVisibility: function() {
+      var pwdInput = document.getElementById("input-password");
+      var toggleBtn = document.getElementById("toggle-password-btn");
+      if (!pwdInput || !toggleBtn) return;
+
+      if (pwdInput.type === "password") {
+        pwdInput.type = "text";
+        toggleBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+      } else {
+        pwdInput.type = "password";
+        toggleBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+      }
+    },
+
+    /**
+     * Xử lý gửi Form Đăng nhập
+     * @param {Event} e 
+     */
+    handleLoginSubmit: function(e) {
+      e.preventDefault();
+
+      var usernameInput = document.getElementById("input-username");
+      var passwordInput = document.getElementById("input-password");
+      var submitBtn = document.getElementById("btn-login-submit");
+
+      var username = usernameInput ? usernameInput.value.trim() : "";
+      var password = passwordInput ? passwordInput.value : "";
+
+      // Client-side validation
+      if (!username) {
+        APP.showToast("Vui lòng nhập tên đăng nhập.", "error");
+        if (usernameInput) usernameInput.focus();
+        return;
+      }
+
+      if (!password) {
+        APP.showToast("Vui lòng nhập mật khẩu.", "error");
+        if (passwordInput) passwordInput.focus();
+        return;
+      }
+
+      // Kích hoạt trạng thái loading trên nút bấm
+      APP.setButtonLoading(submitBtn, true, "Đăng nhập hệ thống");
+
+      var credentials = {
+        username: username,
+        password: password
+      };
+
+      console.log("[BaseAppScript] Đang gửi yêu cầu đăng nhập cho tài khoản:", username);
+
+      // Gọi API Backend qua google.script.run
+      if (typeof google !== "undefined" && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            console.log("[BaseAppScript] Kết quả đăng nhập từ server:", response);
+            APP.setButtonLoading(submitBtn, false, "Đăng nhập hệ thống");
+            if (response && response.success) {
+              APP.saveSession(response.data);
+              APP.updateUserUI(response.data);
+              APP.applyMenuPermissions(response.data);
+              APP.showToast(response.message || "Đăng nhập thành công!", "success");
+              
+              // Xóa trắng ô nhập mật khẩu
+              if (passwordInput) passwordInput.value = "";
+              
+              // Chuyển sang màn hình làm việc
+              APP.switchView("app");
+            } else {
+              APP.showToast(response ? response.message : "Đăng nhập thất bại.", "error");
+            }
+          })
+          .withFailureHandler(function(err) {
+            console.error("[BaseAppScript] Lỗi gọi API backend:", err);
+            APP.setButtonLoading(submitBtn, false, "Đăng nhập hệ thống");
+            APP.showToast("Lỗi kết nối máy chủ: " + (err.message || err), "error");
+          })
+          .apiLogin(credentials);
+      } else {
+        // Môi trường Local Mock Test (nếu mở trực tiếp bằng browser ngoài Google Apps Script)
+        setTimeout(function() {
+          APP.setButtonLoading(submitBtn, false, "Đăng nhập hệ thống");
+          if (username === "admin" && password === "admin123") {
+            var mockUser = {
+              id: "USR001",
+              username: "admin",
+              full_name: "Quản trị viên Hệ thống (Demo Local)",
+              roles: [{ code: "Admin", name: "Quản trị viên toàn quyền" }],
+              token: "mock_local_token_" + Date.now()
+            };
+            APP.saveSession(mockUser);
+            APP.updateUserUI(mockUser);
+            APP.showToast("Đăng nhập thành công (Môi trường cục bộ)!", "success");
+            APP.switchView("app");
+          } else {
+            APP.showToast("Tên đăng nhập hoặc mật khẩu không chính xác.", "error");
+          }
+        }, 600);
+      }
+    },
+
+    /**
+     * Xử lý Đăng xuất
+     */
+    handleLogout: function() {
+      var currentToken = APP.token;
+      if (currentToken && typeof google !== "undefined" && google.script && google.script.run) {
+        google.script.run.apiLogout(currentToken);
+      }
+      APP.clearSession();
+      APP.switchView("auth");
+      APP.showToast("Bạn đã đăng xuất an toàn khỏi hệ thống.", "info");
+    },
+
+    /**
+     * Bật / Tắt menu dropdown thông tin tài khoản trên Header
+     */
+    toggleUserMenu: function(e) {
+      if (e) e.stopPropagation();
+      var menu = document.getElementById("header-user-menu");
+      if (!menu) return;
+      menu.style.display = (menu.style.display === "none" || !menu.style.display) ? "block" : "none";
+    },
+
+    /**
+     * Đóng menu dropdown tài khoản
+     */
+    closeUserMenu: function() {
+      var menu = document.getElementById("header-user-menu");
+      if (menu) menu.style.display = "none";
+    },
+
+    /**
+     * Mở Modal Đổi mật khẩu cá nhân
+     */
+    openChangePasswordModal: function(e) {
+      if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+      this.closeUserMenu();
+      var modal = document.getElementById("modal-change-password");
+      var alertBox = document.getElementById("change-pwd-alert");
+      var form = document.getElementById("form-change-password");
+
+      if (alertBox) {
+        alertBox.style.display = "none";
+        alertBox.textContent = "";
+      }
+      if (form) form.reset();
+
+      if (modal) {
+        modal.classList.add("open", "active");
+        modal.style.display = "flex";
+      }
+      setTimeout(function() {
+        var oldInput = document.getElementById("input-old-password");
+        if (oldInput) oldInput.focus();
+      }, 150);
+    },
+
+    /**
+     * Đóng Modal Đổi mật khẩu cá nhân
+     */
+    closeChangePasswordModal: function() {
+      var modal = document.getElementById("modal-change-password");
+      if (modal) {
+        modal.classList.remove("open", "active");
+        modal.style.display = "none";
+      }
+    },
+
+    /**
+     * Chuyển đổi ẩn/hiện mật khẩu cho bất kỳ ô input nào
+     */
+    toggleFieldVisibility: function(fieldId, btn) {
+      var input = document.getElementById(fieldId);
+      if (!input) return;
+
+      if (input.type === "password") {
+        input.type = "text";
+        if (btn) {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+        }
+      } else {
+        input.type = "password";
+        if (btn) {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+        }
+      }
+    },
+
+    /**
+     * Xử lý Submit Form Đổi mật khẩu cá nhân
+     */
+    handleChangePasswordSubmit: function(e) {
+      if (e) e.preventDefault();
+      var self = this;
+
+      var token = (typeof APP !== "undefined" && APP.token) || localStorage.getItem("sp_token");
+      if (!token) {
+        APP.showToast("Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.", "error");
+        return;
+      }
+
+      var oldPwdInput = document.getElementById("input-old-password");
+      var newPwdInput = document.getElementById("input-new-password");
+      var confirmPwdInput = document.getElementById("input-confirm-password");
+      var submitBtn = document.getElementById("btn-submit-change-password");
+      var alertBox = document.getElementById("change-pwd-alert");
+
+      var oldPwd = oldPwdInput ? oldPwdInput.value : "";
+      var newPwd = newPwdInput ? newPwdInput.value : "";
+      var confirmPwd = confirmPwdInput ? confirmPwdInput.value : "";
+
+      var showAlert = function(msg, isError) {
+        if (!alertBox) {
+          APP.showToast(msg, isError ? "error" : "success");
+          return;
+        }
+        alertBox.textContent = msg;
+        alertBox.style.display = "block";
+        alertBox.style.background = isError ? "#fef2f2" : "#f0fdf4";
+        alertBox.style.color = isError ? "#dc2626" : "#166534";
+        alertBox.style.border = "1px solid " + (isError ? "#fecaca" : "#bbf7d0");
+      };
+
+      if (!oldPwd) {
+        showAlert("Vui lòng nhập mật khẩu hiện tại.", true);
+        if (oldPwdInput) oldPwdInput.focus();
+        return;
+      }
+
+      if (!newPwd || newPwd.length < 6) {
+        showAlert("Mật khẩu mới phải có tối thiểu 6 ký tự.", true);
+        if (newPwdInput) newPwdInput.focus();
+        return;
+      }
+
+      if (newPwd === oldPwd) {
+        showAlert("Mật khẩu mới không được trùng với mật khẩu hiện tại.", true);
+        if (newPwdInput) newPwdInput.focus();
+        return;
+      }
+
+      if (newPwd !== confirmPwd) {
+        showAlert("Xác nhận mật khẩu mới không khớp.", true);
+        if (confirmPwdInput) confirmPwdInput.focus();
+        return;
+      }
+
+      if (alertBox) alertBox.style.display = "none";
+      APP.setButtonLoading(submitBtn, true, "Lưu thay đổi");
+
+      if (typeof google !== "undefined" && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function(response) {
+            APP.setButtonLoading(submitBtn, false, "Lưu thay đổi");
+            if (response && response.success) {
+              APP.showToast(response.message || "Đổi mật khẩu thành công!", "success");
+              self.closeChangePasswordModal();
+            } else {
+              showAlert(response ? response.message : "Đổi mật khẩu không thành công.", true);
+            }
+          })
+          .withFailureHandler(function(err) {
+            APP.setButtonLoading(submitBtn, false, "Lưu thay đổi");
+            showAlert("Lỗi kết nối máy chủ: " + (err.message || err), true);
+          })
+          .apiChangePassword(token, oldPwd, newPwd);
+      } else {
+        setTimeout(function() {
+          APP.setButtonLoading(submitBtn, false, "Lưu thay đổi");
+          APP.showToast("Đổi mật khẩu thành công (Môi trường cục bộ)!", "success");
+          self.closeChangePasswordModal();
+        }, 500);
+      }
+    }
+  };
+
+  document.addEventListener("DOMContentLoaded", function() {
+    AUTH_CLIENT.init();
+  });
+</script>
