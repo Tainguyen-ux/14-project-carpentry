@@ -115,6 +115,7 @@
               
               // Chuyển sang màn hình làm việc
               APP.switchView("app");
+              APP.navigateTo("dashboard");
             } else {
               APP.showToast(response ? response.message : "Đăng nhập thất bại.", "error");
             }

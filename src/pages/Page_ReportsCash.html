@@ -1,0 +1,412 @@
+<!-- =========================================================================
+     VIEW: BÁO CÁO LÃI/LỖ, SỔ QUỸ & DANH MỤC VẬT TƯ (`view-reports-cash`)
+     ========================================================================= -->
+<div id="view-reports-cash" class="content-view" style="display:none;">
+  <div class="crp-chip-bar">
+    <button type="button" class="crp-chip-btn active" id="tab-rc-reports" onclick="REPORTS_CASH_CLIENT.switchTab('reports')">📊 Báo cáo Lãi/Lỗ Công trình</button>
+    <button type="button" class="crp-chip-btn" id="tab-rc-cash" onclick="REPORTS_CASH_CLIENT.switchTab('cash')">💵 Sổ quỹ &amp; Nhập vật tư</button>
+    <button type="button" class="crp-chip-btn" id="tab-rc-catalog" onclick="REPORTS_CASH_CLIENT.switchTab('catalog')">🪵 Danh mục Ván &amp; Hạng mục</button>
+  </div>
+
+  <!-- TAB 1: BÁO CÁO LÃI / LỖ -->
+  <div id="panel-rc-reports">
+    <div class="toolbar-card">
+      <div class="toolbar-left">
+        <label class="form-label" style="margin:0;">Tháng báo cáo:</label>
+        <input type="month" id="rep-month-key" class="form-input" style="width:auto;" onchange="REPORTS_CASH_CLIENT.loadReports()">
+      </div>
+      <div class="toolbar-right">
+        <button type="button" class="btn btn-secondary" onclick="REPORTS_CASH_CLIENT.loadReports()">Làm mới báo cáo</button>
+      </div>
+    </div>
+    <div class="crp-kpi-grid">
+      <div class="crp-kpi-card"><div class="crp-kpi-icon" style="background:#eff6ff;color:#1d4ed8;">📋</div><div><span class="crp-kpi-label">Giá trị HĐ ký mới</span><span class="crp-kpi-val" id="rep-kpi-signed">0 ₫</span></div></div>
+      <div class="crp-kpi-card"><div class="crp-kpi-icon" style="background:#ecfdf5;color:#059669;">💰</div><div><span class="crp-kpi-label">Thực thu trong tháng</span><span class="crp-kpi-val" id="rep-kpi-collected">0 ₫</span></div></div>
+      <div class="crp-kpi-card"><div class="crp-kpi-icon" style="background:#fff7ed;color:#c2410c;">🪵</div><div><span class="crp-kpi-label">Chi phí VT &amp; Nhân công</span><span class="crp-kpi-val" id="rep-kpi-cost">0 ₫</span></div></div>
+      <div class="crp-kpi-card"><div class="crp-kpi-icon" style="background:#f0fdf4;color:#15803d;">📈</div><div><span class="crp-kpi-label">Lợi nhuận gộp ước tính</span><span class="crp-kpi-val" id="rep-kpi-profit">0 ₫</span></div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Mã Đơn &amp; Chủ đầu tư</th>
+              <th>Giá trị HĐ</th>
+              <th>Đã thu</th>
+              <th>Chi phí VT &amp; Lắp</th>
+              <th>Lãi gộp (%)</th>
+            </tr>
+          </thead>
+          <tbody id="rep-projects-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: SỔ QUỸ TIỀN MẶT / CHUYỂN KHOẢN -->
+  <div id="panel-rc-cash" style="display:none;">
+    <div class="toolbar-card">
+      <div class="toolbar-left" id="cash-summary-badges" style="font-size:13px;font-weight:700;"></div>
+      <div class="toolbar-right">
+        <button type="button" id="btn-cash-create" class="btn btn-primary" onclick="REPORTS_CASH_CLIENT.openCashModal()">+ Ghi Phiếu Thu/Chi &amp; Nhập VT</button>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Mã GD &amp; Ngày</th>
+              <th>Loại / Nội dung</th>
+              <th>Đơn hàng</th>
+              <th style="text-align:right;">Số tiền</th>
+            </tr>
+          </thead>
+          <tbody id="cash-tbody"></tbody>
+        </table>
+      </div>
+      <div id="cash-pagination" class="pagination-wrapper" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- TAB 3: DANH MỤC VẬT TƯ / HẠNG MỤC MẪU -->
+  <div id="panel-rc-catalog" style="display:none;">
+    <div class="toolbar-card">
+      <div class="toolbar-left">
+        <input type="text" id="cat-search-input" class="form-input" placeholder="🔍 Tìm mã VT, tên ván MDF, phụ kiện..." onkeydown="if(event.key==='Enter') REPORTS_CASH_CLIENT.loadCatalog(1)">
+      </div>
+      <div class="toolbar-right">
+        <button type="button" id="btn-cat-add" class="btn btn-primary" onclick="REPORTS_CASH_CLIENT.openCatModal()">+ Thêm Vật tư / Mẫu báo giá</button>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Mã &amp; Tên Vật tư / Hạng mục</th>
+              <th>Loại</th>
+              <th>Giá vốn / Giá bán</th>
+              <th>Tồn kho</th>
+            </tr>
+          </thead>
+          <tbody id="cat-tbody"></tbody>
+        </table>
+      </div>
+      <div id="cat-pagination" class="pagination-wrapper" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Tạo giao dịch Sổ quỹ (Hỗ trợ Nhập Ván/Phụ Kiện cộng tồn kho) -->
+<div id="modal-cash-tx" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:500px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#fffbeb;color:#b45309;">💵</div>
+        <div>
+          <h3 class="modal-title">Ghi Sổ Quỹ / Nhập Kho Vật Tư</h3>
+          <div class="modal-subtitle">Chi nhập ván gỗ (MATERIAL_PURCHASE) tự động cộng tồn kho</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="REPORTS_CASH_CLIENT.closeCashModal()">✕</button>
+    </div>
+    <form onsubmit="REPORTS_CASH_CLIENT.submitCash(event)">
+      <div class="modal-body" style="padding:18px;">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="ctx-type">Loại giao dịch</label>
+            <select id="ctx-type" class="form-select">
+              <option value="OUT">Khoản CHI (Nhập ván / Vận chuyển)</option>
+              <option value="IN">Khoản THU khác</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ctx-category">Nhóm chi phí / thu</label>
+            <select id="ctx-category" class="form-select">
+              <option value="MATERIAL_PURCHASE">Nhập ván gỗ / Phụ kiện kho</option>
+              <option value="DELIVERY_INSTALL_COST">Chi vận chuyển &amp; lắp đặt</option>
+              <option value="WORKSHOP_LABOR">Chi công thợ xưởng</option>
+              <option value="OTHER_IN">Thu khác</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="ctx-mat-id">Vật tư nhập kho (nếu nhập kho)</label>
+            <select id="ctx-mat-id" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ctx-qty">SL Nhập cộng kho</label>
+            <input type="number" min="0" id="ctx-qty" class="form-input" value="0">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label required" for="ctx-amount">Số tiền (VNĐ)</label>
+            <input type="number" min="1" id="ctx-amount" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ctx-channel">Kênh thanh toán</label>
+            <select id="ctx-channel" class="form-select">
+              <option value="BANK_TRANSFER">Chuyển khoản</option>
+              <option value="CASH">Tiền mặt</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="ctx-desc">Diễn giải chi tiết</label>
+          <input type="text" id="ctx-desc" class="form-input" placeholder="VD: Nhập 50 tấm MDF chống ẩm An Cường" required>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="REPORTS_CASH_CLIENT.closeCashModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu Sổ Quỹ</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL: Thêm Vật tư Ván / Phụ kiện hoặc Mẫu Hạng mục -->
+<div id="modal-cat-item" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:520px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#fffbeb;color:#b45309;">🪵</div>
+        <div>
+          <h3 class="modal-title">Thêm Vật Tư / Mẫu Hạng Mục</h3>
+          <div class="modal-subtitle">Quản lý ván gỗ, bản lề ray trượt hoặc mẫu tính giá md/m2</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="REPORTS_CASH_CLIENT.closeCatModal()">✕</button>
+    </div>
+    <form onsubmit="REPORTS_CASH_CLIENT.submitCat(event)">
+      <div class="modal-body" style="padding:18px;">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="mcat-kind">Phân loại</label>
+            <select id="mcat-kind" class="form-select">
+              <option value="RAW_MATERIAL">Vật tư Ván / Phụ kiện (Kho)</option>
+              <option value="ITEM_TEMPLATE">Mẫu Hạng mục báo giá</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label required" for="mcat-name">Tên Vật tư / Hạng mục</label>
+            <input type="text" id="mcat-name" class="form-input" placeholder="VD: Ván MDF chống ẩm 17mm 388 EV" required>
+          </div>
+        </div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label class="form-label" for="mcat-unit">Đơn vị</label>
+            <input type="text" id="mcat-unit" class="form-input" value="Tấm">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="mcat-cost">Giá vốn (đ)</label>
+            <input type="number" min="0" id="mcat-cost" class="form-input" value="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="mcat-stock">Tồn đầu (SL)</label>
+            <input type="number" min="0" id="mcat-stock" class="form-input" value="10">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="REPORTS_CASH_CLIENT.closeCatModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu Danh Mục</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var REPORTS_CASH_CLIENT = {
+    cashPage: 1,
+    catPage: 1,
+    pageSize: 10,
+
+    onInit: function() {
+      var mInp = document.getElementById("rep-month-key");
+      if (mInp && !mInp.value) mInp.value = new Date().toISOString().slice(0, 7);
+      var btnCash = document.getElementById("btn-cash-create");
+      if (btnCash) btnCash.style.display = APP.hasPermission("material.expense_create") ? "" : "none";
+      var btnCat = document.getElementById("btn-cat-add");
+      if (btnCat) btnCat.style.display = (APP.hasPermission("order.approve") || APP.hasPermission("material.expense_create")) ? "" : "none";
+      this.loadReports();
+    },
+
+    onReload: function() { this.loadReports(); },
+
+    switchTab: function(tab) {
+      document.getElementById("tab-rc-reports").classList.toggle("active", tab === "reports");
+      document.getElementById("tab-rc-cash").classList.toggle("active", tab === "cash");
+      document.getElementById("tab-rc-catalog").classList.toggle("active", tab === "catalog");
+      document.getElementById("panel-rc-reports").style.display = tab === "reports" ? "" : "none";
+      document.getElementById("panel-rc-cash").style.display = tab === "cash" ? "" : "none";
+      document.getElementById("panel-rc-catalog").style.display = tab === "catalog" ? "" : "none";
+      if (tab === "reports") this.loadReports();
+      else if (tab === "cash") this.loadCash(1);
+      else this.loadCatalog(1);
+    },
+
+    loadReports: function() {
+      var mk = (document.getElementById("rep-month-key") || {}).value || "";
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) return;
+          var s = res.data.summary || {};
+          document.getElementById("rep-kpi-signed").textContent = UTILS.formatCurrency(s.total_contract_signed || 0);
+          document.getElementById("rep-kpi-collected").textContent = UTILS.formatCurrency(s.total_collected || 0);
+          document.getElementById("rep-kpi-cost").textContent = UTILS.formatCurrency(s.total_material_and_extra_cost || 0);
+          document.getElementById("rep-kpi-profit").textContent = UTILS.formatCurrency(s.estimated_gross_profit || 0) + " (" + (s.gross_margin_pct || 0) + "%)";
+
+          var rows = res.data.project_profit_list || [];
+          var tbody = document.getElementById("rep-projects-tbody");
+          if (tbody) {
+            tbody.innerHTML = rows.map(function(p) {
+              return '<tr>' +
+                '<td><code>' + UTILS.escapeHtml(p.order_code) + '</code> <strong>' + UTILS.escapeHtml(p.customer_name) + '</strong><div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(p.title) + '</div></td>' +
+                '<td><strong>' + UTILS.formatCurrency(p.total_amount) + '</strong></td>' +
+                '<td style="color:#059669;">' + UTILS.formatCurrency(p.paid_amount) + '</td>' +
+                '<td>' + UTILS.formatCurrency((p.material_cost_total || 0) + (p.labor_extra_cost || 0)) + '</td>' +
+                '<td><strong style="color:#15803d;">' + UTILS.formatCurrency(p.gross_profit) + '</strong> (' + p.gross_margin_pct + '%)</td>' +
+              '</tr>';
+            }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">Chưa có đơn hàng trong tháng này.</td></tr>';
+          }
+        })
+        .apiGetCarpentryReports(AUTH.getToken(), { month_key: mk });
+    },
+
+    loadCash: function(page) {
+      var self = this;
+      this.cashPage = page || 1;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) return;
+          var sum = res.data.summary || {};
+          var sumEl = document.getElementById("cash-summary-badges");
+          if (sumEl) {
+            sumEl.innerHTML = 'Tồn đầu: ' + UTILS.formatCurrency(sum.opening_balance || 0) +
+              ' &nbsp;|&nbsp; <span style="color:#059669;">Tổng thu: +' + UTILS.formatCurrency(sum.total_in || 0) + '</span>' +
+              ' &nbsp;|&nbsp; <span style="color:#dc2626;">Tổng chi: -' + UTILS.formatCurrency(sum.total_out || 0) + '</span>' +
+              ' &nbsp;|&nbsp; <span style="color:#92400e;">Tồn cuối: ' + UTILS.formatCurrency(sum.closing_balance || 0) + '</span>';
+          }
+          var tbody = document.getElementById("cash-tbody");
+          if (tbody) {
+            tbody.innerHTML = (res.data.items || []).map(function(t) {
+              var isIn = t.tx_type === "IN";
+              return '<tr>' +
+                '<td><code>' + UTILS.escapeHtml(t.tx_code) + '</code><div style="font-size:11.5px;color:var(--text-muted);">' + CARPENTRY_HELPER.formatDateVi(t.tx_date) + '</div></td>' +
+                '<td><strong>' + UTILS.escapeHtml(t.category) + '</strong><div style="font-size:12px;">' + UTILS.escapeHtml(t.description) + '</div></td>' +
+                '<td>' + UTILS.escapeHtml(t.order_code || "-") + '</td>' +
+                '<td style="text-align:right;font-weight:700;color:' + (isIn ? "#059669" : "#dc2626") + ';">' + (isIn ? "+" : "-") + UTILS.formatCurrency(t.amount) + '</td>' +
+              '</tr>';
+            }).join("");
+          }
+          APP.renderPagination("cash-pagination", res.data.pagination, function(p) { self.loadCash(p); });
+        })
+        .apiGetCashTransactions(AUTH.getToken(), {}, this.cashPage, this.pageSize);
+    },
+
+    openCashModal: function() {
+      CARPENTRY_HELPER.loadMeta(function(meta) {
+        var sel = document.getElementById("ctx-mat-id");
+        if (sel && meta && meta.catalog) {
+          sel.innerHTML = '<option value="">-- Không chọn (Chi phí vận hành) --</option>' +
+            meta.catalog.filter(function(c) { return c.catalog_kind === "RAW_MATERIAL"; }).map(function(c) {
+              return '<option value="' + c.id + '">' + UTILS.escapeHtml(c.material_code + " - " + c.item_name) + '</option>';
+            }).join("");
+        }
+        var m = document.getElementById("modal-cash-tx");
+        if (m) m.classList.add("open");
+      }, true);
+    },
+
+    closeCashModal: function() {
+      var m = document.getElementById("modal-cash-tx");
+      if (m) m.classList.remove("open");
+    },
+
+    submitCash: function(e) {
+      e.preventDefault();
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã ghi sổ quỹ!", "success");
+            self.closeCashModal();
+            self.loadCash(1);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi ghi sổ quỹ.", "error");
+          }
+        })
+        .apiCreateCashTransaction(AUTH.getToken(), {
+          tx_type: (document.getElementById("ctx-type") || {}).value || "OUT",
+          category: (document.getElementById("ctx-category") || {}).value || "MATERIAL_PURCHASE",
+          material_id: (document.getElementById("ctx-mat-id") || {}).value || "",
+          qty: Number((document.getElementById("ctx-qty") || {}).value) || 0,
+          amount: Number((document.getElementById("ctx-amount") || {}).value) || 0,
+          payment_channel: (document.getElementById("ctx-channel") || {}).value || "BANK_TRANSFER",
+          description: (document.getElementById("ctx-desc") || {}).value || ""
+        });
+    },
+
+    loadCatalog: function(page) {
+      var self = this;
+      this.catPage = page || 1;
+      var kw = (document.getElementById("cat-search-input") || {}).value || "";
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          var tbody = document.getElementById("cat-tbody");
+          if (!tbody || !res || !res.success || !res.data) return;
+          tbody.innerHTML = (res.data.items || []).map(function(c) {
+            return '<tr>' +
+              '<td><code>' + UTILS.escapeHtml(c.material_code) + '</code> <strong>' + UTILS.escapeHtml(c.item_name) + '</strong></td>' +
+              '<td>' + UTILS.escapeHtml(c.catalog_kind) + '</td>' +
+              '<td>Vốn: ' + UTILS.formatCurrency(c.default_cost_price) + ' / ' + UTILS.escapeHtml(c.unit) + '</td>' +
+              '<td><strong>' + c.stock_qty + ' ' + UTILS.escapeHtml(c.unit) + '</strong></td>' +
+            '</tr>';
+          }).join("");
+          APP.renderPagination("cat-pagination", res.data.pagination, function(p) { self.loadCatalog(p); });
+        })
+        .apiGetMaterialCatalog(AUTH.getToken(), { keyword: kw }, this.catPage, this.pageSize);
+    },
+
+    openCatModal: function() {
+      var m = document.getElementById("modal-cat-item");
+      if (m) m.classList.add("open");
+    },
+
+    closeCatModal: function() {
+      var m = document.getElementById("modal-cat-item");
+      if (m) m.classList.remove("open");
+    },
+
+    submitCat: function(e) {
+      e.preventDefault();
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã thêm vào danh mục!", "success");
+            self.closeCatModal();
+            self.loadCatalog(1);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi thêm danh mục.", "error");
+          }
+        })
+        .apiSaveMaterialCatalog(AUTH.getToken(), {
+          catalog_kind: (document.getElementById("mcat-kind") || {}).value || "RAW_MATERIAL",
+          item_name: (document.getElementById("mcat-name") || {}).value || "",
+          unit: (document.getElementById("mcat-unit") || {}).value || "Tấm",
+          default_cost_price: Number((document.getElementById("mcat-cost") || {}).value) || 0,
+          stock_qty: Number((document.getElementById("mcat-stock") || {}).value) || 0
+        });
+    }
+  };
+  APP.registerModule("reports-cash", REPORTS_CASH_CLIENT, "view-reports-cash");
+</script>

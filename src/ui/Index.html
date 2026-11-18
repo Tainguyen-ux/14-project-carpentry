@@ -23,9 +23,9 @@
   <main id="auth-view" class="auth-wrapper">
     <div class="auth-card">
       <div class="auth-brand">
-        <div class="auth-brand-logo">BF</div>
-        <h1 class="auth-title">Base Framework</h1>
-        <p class="auth-subtitle">Nền tảng Quản trị & Ứng dụng Doanh nghiệp</p>
+        <div class="auth-brand-logo" style="background:linear-gradient(135deg,#451a03,#b45309);">XM</div>
+        <h1 class="auth-title">Xưởng Mộc &amp; Nội Thất</h1>
+        <p class="auth-subtitle">Hệ thống Quản lý May đo Công trình • Đo đạc - Xưởng CNC - Lắp đặt</p>
       </div>
 
       <form id="login-form" novalidate>
@@ -114,7 +114,7 @@
           </svg>
         </button>
 
-        <div class="app-header-logo">BF</div>
+        <div class="app-header-logo" style="background:linear-gradient(135deg,#451a03,#b45309);">XM</div>
         <div class="app-header-title-group">
           <span class="app-header-title"><?= appName ?></span>
           <span class="app-header-version">v<?= appVersion ?></span>
@@ -122,6 +122,12 @@
       </div>
 
       <div class="app-header-right">
+        <button type="button" id="btn-header-quick-survey" class="btn-header-crp" onclick="CARPENTRY_HELPER.openQuickSurvey()" style="display:none;" title="Ghi phiếu khảo sát đo đạc công trình">
+          📐 <span>Đo đạc mới</span>
+        </button>
+        <button type="button" id="btn-header-quick-qr" class="btn-header-crp" onclick="CARPENTRY_HELPER.openQrScanModal()" style="display:none;" title="Quét tem QR kiện hàng / Mã đơn NT-">
+          📷 <span>Quét QR Kiện</span>
+        </button>
         <div style="position: relative;">
           <div id="header-user-badge" class="user-profile-badge" onclick="AUTH_CLIENT.toggleUserMenu(event)" style="cursor: pointer;" title="Tài khoản cá nhân & Đổi mật khẩu">
             <div id="header-user-avatar" class="user-avatar">A</div>
@@ -206,20 +212,20 @@
             </ul>
           </div>
 
-          <!-- Nhóm 2: NGHIỆP VỤ MẪU (Điểm gắn Module Nghiệp vụ mới) -->
+          <!-- Nhóm 2: VẬN HÀNH XƯỞNG MỘC (Tĩnh dự phòng, sẽ được renderDynamicSidebar() thay thế từ bảng MENUS) -->
           <div class="nav-group">
-            <div class="nav-group-title">Nghiệp vụ mẫu</div>
+            <div class="nav-group-title">Vận hành Xưởng</div>
             <ul class="nav-list">
               <li>
-                <div class="nav-item" data-module="sample" data-menu-perm="menu.sample" data-title="Module Nghiệp vụ Mẫu" data-group="Nghiệp vụ mẫu" data-desc="Điểm neo mẫu dành cho các phân hệ nghiệp vụ của dự án triển khai (CRM, Kho, Đặt lịch, Nhân sự...). Đăng ký qua APP.registerModule().">
-                  <span class="nav-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                      <polyline points="2 17 12 22 22 17"></polyline>
-                      <polyline points="2 12 12 17 22 12"></polyline>
-                    </svg>
-                  </span>
-                  <span class="nav-label">Nghiệp vụ mẫu</span>
+                <div class="nav-item" data-module="orders" data-menu-perm="menu.orders" data-title="Báo giá & Đơn hàng" data-group="1. Thiết Kế & Báo Giá">
+                  <span class="nav-icon">📋</span>
+                  <span class="nav-label">Báo giá &amp; Đơn hàng</span>
+                </div>
+              </li>
+              <li>
+                <div class="nav-item" data-module="production" data-menu-perm="menu.production" data-title="Tiến độ Xưởng" data-group="2. Sản Xuất & Vật Tư">
+                  <span class="nav-icon">🏭</span>
+                  <span class="nav-label">Tiến độ Xưởng</span>
                 </div>
               </li>
             </ul>
@@ -326,58 +332,110 @@
           <h1 class="content-title" id="content-title">Bảng điều khiển Tổng quan</h1>
         </div>
 
-        <!-- VIEW 1: Bảng điều khiển Tổng quan Core (Mặc định) -->
+        <!-- VIEW 1: Bảng điều khiển Tổng quan Xưởng Mộc (Mặc định) -->
         <div id="view-dashboard" class="content-view">
-          <div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 24px; margin-bottom: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+          <div class="crp-hero-card">
             <div>
-              <h2 style="font-size: 22px; font-weight: 700; color: var(--text-main); margin: 0 0 6px 0;">
-                Xin chào, <span id="welcome-user-name" style="color: var(--primary);">Quản trị viên</span>!
+              <h2 class="crp-hero-title">
+                Xin chào, <span id="welcome-user-name">Quản trị viên</span>! 🪵
               </h2>
-              <p style="margin: 0; font-size: 13.5px; color: var(--text-muted);">
-                Khung sườn nền tảng <strong>BaseAppScript Framework</strong> đã sẵn sàng. Các phân hệ Xác thực, Người dùng, Vai trò & Phân quyền 2 tầng, Cấu hình và Nhật ký kiểm toán đang hoạt động ổn định.
+              <p class="crp-hero-sub">
+                Điều phối Xưởng Mộc &amp; Nội thất May đo: Đo đạc công trình → Bản vẽ 2D/3D → Cắt CNC → Sơn PU → Giao lắp &amp; Thu Đợt 1-2-3.
               </p>
             </div>
-            <span class="badge" style="background: #eef2ff; color: #4338ca; font-weight: 600; padding: 6px 14px; border-radius: 999px; font-size: 12px;">
-              Core Ready • v<?= appVersion ?>
-            </span>
+            <div class="crp-hero-actions">
+              <button type="button" id="btn-dash-new-survey" class="btn-crp-hero" onclick="CARPENTRY_HELPER.openQuickSurvey()">
+                📐 Đo đạc công trình
+              </button>
+              <button type="button" id="btn-dash-new-order" class="btn-crp-glass" onclick="APP.navigateTo('orders')">
+                📋 Lập Báo giá / Đơn
+              </button>
+              <button type="button" class="btn-crp-glass" onclick="CARPENTRY_HELPER.openQrScanModal()">
+                📷 Quét QR Kiện hàng
+              </button>
+            </div>
           </div>
 
-          <div class="roles-stats-grid" style="margin-bottom: 20px;">
-            <div class="stat-card" style="cursor: pointer;" onclick="APP.navigateTo('users')">
-              <div class="stat-icon" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-                  <circle cx="9" cy="7" r="4"></circle>
-                </svg>
+          <div class="crp-kpi-grid">
+            <div class="crp-kpi-card" onclick="APP.navigateTo('production')">
+              <div class="crp-kpi-icon" style="background:#f5f3ff;color:#7c3aed;">🏭</div>
+              <div>
+                <span class="crp-kpi-label">Đơn đang sản xuất</span>
+                <span class="crp-kpi-val" id="dash-kpi-inprod">0</span>
               </div>
-              <div class="stat-info">
-                <span class="stat-label">Quản lý Tài khoản</span>
-                <span class="stat-value" style="font-size: 16px;">Người dùng & Phiên</span>
+            </div>
+            <div class="crp-kpi-card" onclick="APP.navigateTo('install-warranty')">
+              <div class="crp-kpi-icon" style="background:#f0fdfa;color:#0d9488;">🚚</div>
+              <div>
+                <span class="crp-kpi-label">Đang vận chuyển / Lắp</span>
+                <span class="crp-kpi-val" id="dash-kpi-installing">0</span>
+              </div>
+            </div>
+            <div class="crp-kpi-card" onclick="APP.navigateTo('orders')">
+              <div class="crp-kpi-icon" style="background:#fffbeb;color:#b45309;">📅</div>
+              <div>
+                <span class="crp-kpi-label">Sắp đến hạn bàn giao</span>
+                <span class="crp-kpi-val" id="dash-kpi-upcoming">0</span>
+              </div>
+            </div>
+            <div class="crp-kpi-card" onclick="APP.navigateTo('production')">
+              <div class="crp-kpi-icon" style="background:#fef2f2;color:#dc2626;">⚠</div>
+              <div>
+                <span class="crp-kpi-label">Cần đẩy nhanh / Trễ hạn</span>
+                <span class="crp-kpi-val" id="dash-kpi-delayed" style="color:#dc2626;">0</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="crp-kpi-grid">
+            <div class="crp-kpi-card" onclick="APP.navigateTo('orders')">
+              <div class="crp-kpi-icon" style="background:#f0fdf4;color:#15803d;">💰</div>
+              <div>
+                <span class="crp-kpi-label">Giá trị đơn đang làm</span>
+                <span class="crp-kpi-val" id="dash-kpi-value" style="color:#15803d;">0 ₫</span>
+              </div>
+            </div>
+            <div class="crp-kpi-card" onclick="APP.navigateTo('payments')">
+              <div class="crp-kpi-icon" style="background:#fff7ed;color:#c2410c;">💵</div>
+              <div>
+                <span class="crp-kpi-label">Công nợ HĐ cần thu</span>
+                <span class="crp-kpi-val" id="dash-kpi-debt" style="color:#c2410c;">0 ₫</span>
+              </div>
+            </div>
+            <div class="crp-kpi-card" onclick="APP.navigateTo('drawings')">
+              <div class="crp-kpi-icon" style="background:#eff6ff;color:#1d4ed8;">📐</div>
+              <div>
+                <span class="crp-kpi-label">Chờ duyệt bản vẽ SX</span>
+                <span class="crp-kpi-val" id="dash-kpi-drawing">0 đơn</span>
+              </div>
+            </div>
+            <div class="crp-kpi-card" onclick="APP.navigateTo('materials')">
+              <div class="crp-kpi-icon" style="background:#fef2f2;color:#b91c1c;">🪵</div>
+              <div>
+                <span class="crp-kpi-label">Ván &amp; Phụ kiện sắp hết</span>
+                <span class="crp-kpi-val" id="dash-kpi-lowstock" style="color:#b91c1c;">0 mã VT</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="crp-split-grid">
+            <div class="crp-panel-card">
+              <div class="crp-panel-header">
+                <span>⚠ Đơn Hàng Cần Đẩy Nhanh Tiến Độ</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="APP.navigateTo('production')">Bảng xưởng</button>
+              </div>
+              <div class="crp-panel-body" id="dash-urgent-orders">
+                <div style="text-align:center;color:var(--text-muted);padding:14px;font-size:13px;">Đang tải dữ liệu...</div>
               </div>
             </div>
 
-            <div class="stat-card" style="cursor: pointer;" onclick="APP.navigateTo('roles')">
-              <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                </svg>
+            <div class="crp-panel-card">
+              <div class="crp-panel-header">
+                <span>💵 Đợt Thanh Toán Đến Hạn Thu (Đợt 1-2-3)</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="APP.navigateTo('payments')">Thu tiền</button>
               </div>
-              <div class="stat-info">
-                <span class="stat-label">Phân quyền 2 Tầng</span>
-                <span class="stat-value" style="font-size: 16px;">Vai trò & Ma trận RBAC</span>
-              </div>
-            </div>
-
-            <div class="stat-card" style="cursor: pointer;" onclick="APP.navigateTo('settings')">
-              <div class="stat-icon" style="background: rgba(14, 165, 233, 0.1); color: #0ea5e9;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="3"></circle>
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"></path>
-                </svg>
-              </div>
-              <div class="stat-info">
-                <span class="stat-label">Tham số Vận hành</span>
-                <span class="stat-value" style="font-size: 16px;">Cấu hình & Cache</span>
+              <div class="crp-panel-body" id="dash-due-payments">
+                <div style="text-align:center;color:var(--text-muted);padding:14px;font-size:13px;">Đang tải dữ liệu...</div>
               </div>
             </div>
           </div>
@@ -1054,11 +1112,43 @@
           </div>
         </div>
 
-        <!-- NHÚNG CÁC MÀN HÌNH NGHIỆP VỤ CỦA DỰ ÁN (Tách riêng tại thư mục src/pages/) -->
-        <?!= include('Page_Sample'); ?>
+        <!-- NHÚNG 9 MÀN HÌNH NGHIỆP VỤ XƯỞNG MỘC & NỘI THẤT (Tách riêng tại src/pages/) -->
+        <?!= include('Page_Surveys'); ?>
+        <?!= include('Page_Orders'); ?>
+        <?!= include('Page_Drawings'); ?>
+        <?!= include('Page_Production'); ?>
+        <?!= include('Page_Materials'); ?>
+        <?!= include('Page_Payments'); ?>
+        <?!= include('Page_InstallWarranty'); ?>
+        <?!= include('Page_Customers'); ?>
+        <?!= include('Page_ReportsCash'); ?>
 
       </main>
     </div>
+
+    <!-- THANH ĐIỀU HƯỚNG NHANH CHO ĐIỆN THOẠI TẠI CÔNG TRÌNH & XƯỞNG -->
+    <nav id="mobile-bottom-nav" class="crp-bottom-nav" aria-label="Điều hướng nhanh Xưởng Mộc">
+      <button type="button" class="crp-bottom-btn active" data-target="dashboard" onclick="APP.navigateTo('dashboard')">
+        <span>🏠</span>
+        <span>Tổng quan</span>
+      </button>
+      <button type="button" class="crp-bottom-btn" data-target="production" onclick="APP.navigateTo('production')">
+        <span>🏭</span>
+        <span>Xưởng</span>
+      </button>
+      <button type="button" class="crp-bottom-btn" onclick="CARPENTRY_HELPER.openQuickSurvey()" aria-label="Đo đạc">
+        <span class="crp-bottom-fab">📐</span>
+        <span style="color:#92400e;font-weight:700;">Đo đạc</span>
+      </button>
+      <button type="button" class="crp-bottom-btn" onclick="CARPENTRY_HELPER.openQrScanModal()">
+        <span>📷</span>
+        <span>Quét QR</span>
+      </button>
+      <button type="button" class="crp-bottom-btn" onclick="APP.toggleSidebar()">
+        <span>☰</span>
+        <span>Menu</span>
+      </button>
+    </nav>
   </div>
 
   <!-- MODAL: Tạo mới & Chỉnh sửa Người dùng -->
@@ -1727,6 +1817,32 @@
           <button type="submit" class="btn btn-primary" id="btn-submit-cfg-def">Lưu tham số</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Quét Tem QR Kiện hàng / Mã đơn NT- & Mở bản vẽ 2D/3D Drive -->
+  <div id="modal-crp-qr-scan" class="modal-backdrop">
+    <div class="modal-dialog" style="max-width:500px;">
+      <div class="modal-header">
+        <div class="modal-header-info">
+          <div class="modal-header-icon" style="background:#fffbeb;color:#92400e;">📷</div>
+          <div>
+            <h3 class="modal-title">Quét Tem QR Kiện Hàng &amp; Mở Bản Vẽ</h3>
+            <div class="modal-subtitle">Nhập mã tem kiện (PK-NT-...) hoặc mã đơn hàng (NT-...)</div>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" onclick="CARPENTRY_HELPER.closeQrScanModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding:18px;">
+        <form onsubmit="CARPENTRY_HELPER.runQrScan(event)" style="display:flex;gap:8px;margin-bottom:12px;">
+          <input type="text" id="crp-qr-input" class="form-input" placeholder="VD: PK-NT-20261118-001-01 hoặc NT-20261118-001..." required>
+          <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Tra cứu</button>
+        </form>
+        <div id="crp-qr-result"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="CARPENTRY_HELPER.closeQrScanModal()">Đóng</button>
+      </div>
     </div>
   </div>
 

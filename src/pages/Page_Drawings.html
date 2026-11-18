@@ -1,0 +1,284 @@
+<!-- =========================================================================
+     VIEW: CHI TIẾT ĐƠN HÀNG, BẢN VẼ 2D/3D & TEM QR KIỆN (`view-drawings`)
+     ========================================================================= -->
+<div id="view-drawings" class="content-view" style="display:none;">
+  <div class="toolbar-card">
+    <div class="toolbar-left" style="flex:1;">
+      <select id="draw-order-select" class="form-select" onchange="DRAWINGS_CLIENT.loadDetail(this.value)" style="min-width:260px;"></select>
+    </div>
+    <div class="toolbar-right">
+      <button type="button" id="btn-upload-doc" class="btn btn-primary" onclick="DRAWINGS_CLIENT.openUploadModal()">+ Upload Bản vẽ / Ảnh</button>
+      <button type="button" id="btn-gen-pkg-qr" class="btn btn-secondary" onclick="DRAWINGS_CLIENT.openQrGenModal()">🖨️ Tạo Tem QR Kiện</button>
+    </div>
+  </div>
+
+  <div id="draw-detail-panel" class="crp-split-grid">
+    <div class="crp-panel-card">
+      <div class="crp-panel-header"><span>📐 Thư viện Bản vẽ 2D/3D &amp; Ảnh công trình (Drive)</span></div>
+      <div class="crp-panel-body">
+        <div id="draw-files-gallery" class="crp-gallery-grid">
+          <div style="color:var(--text-muted);font-size:13px;">Chọn đơn hàng để xem bản vẽ 2D/3D và ảnh hiện trạng/QC.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="crp-panel-card">
+      <div class="crp-panel-header"><span>📦 Tem QR Kiện hàng Đóng gói &amp; Lắp đặt</span></div>
+      <div class="crp-panel-body">
+        <div id="draw-packages-list">
+          <div style="color:var(--text-muted);font-size:13px;">Chưa có tem QR kiện hàng nào.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Upload Bản vẽ 2D/3D / Ảnh Drive -->
+<div id="modal-upload-drawing" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:520px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#eff6ff;color:#1d4ed8;">📐</div>
+        <div>
+          <h3 class="modal-title">Upload Bản Vẽ / Ảnh Công Trình Lên Drive</h3>
+          <div class="modal-subtitle">Tự động phân thư mục Google Drive theo Mã đơn hàng</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="DRAWINGS_CLIENT.closeUploadModal()">✕</button>
+    </div>
+    <form onsubmit="DRAWINGS_CLIENT.submitUpload(event)">
+      <div class="modal-body" style="padding:18px;">
+        <div class="form-group">
+          <label class="form-label required" for="drw-category">Phân loại tài liệu / ảnh</label>
+          <select id="drw-category" class="form-select" required>
+            <option value="DRAWING_3D">📐 Bản vẽ 3D phối cảnh duyệt</option>
+            <option value="DRAWING_2D">📐 Bản vẽ kỹ thuật bóc tách 2D</option>
+            <option value="SURVEY_PHOTO">📷 Ảnh hiện trạng đo đạc</option>
+            <option value="PRODUCTION_PROGRESS">🏭 Ảnh tiến độ tại xưởng</option>
+            <option value="QC_WORKSHOP">✅ Ảnh QC nghiệm thu tại xưởng</option>
+            <option value="HANDOVER_DONE">🏠 Ảnh bàn giao hoàn thiện</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="drw-title">Tên tài liệu / Phòng lắp đặt</label>
+          <input type="text" id="drw-title" class="form-input" placeholder="VD: Bản vẽ bóc tách Tủ bếp chữ L" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="drw-file-input">Chọn tệp Ảnh / PDF</label>
+          <input type="file" id="drw-file-input" class="form-input" accept="image/*,application/pdf" required>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="DRAWINGS_CLIENT.closeUploadModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary" id="btn-submit-drw-upload">Tải lên Drive</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL: Tạo Tem QR Kiện Hàng -->
+<div id="modal-gen-pkg-qr" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:460px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#fffbeb;color:#b45309;">🏷️</div>
+        <div>
+          <h3 class="modal-title">Tạo &amp; In Tem QR Kiện Hàng</h3>
+          <div class="modal-subtitle">Thợ lắp đặt quét tem QR để kiểm kiện &amp; mở bản vẽ 2D/3D</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="DRAWINGS_CLIENT.closeQrGenModal()">✕</button>
+    </div>
+    <form onsubmit="DRAWINGS_CLIENT.submitQrGen(event)">
+      <div class="modal-body" style="padding:18px;">
+        <div class="form-group">
+          <label class="form-label required" for="qrgen-room">Tên hạng mục / Phòng</label>
+          <input type="text" id="qrgen-room" class="form-input" placeholder="VD: Tủ Bếp Dưới - Phòng Bếp" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="qrgen-count">Số lượng kiện cần đóng gói</label>
+          <input type="number" id="qrgen-count" class="form-input" min="1" max="50" value="3" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="qrgen-desc">Ghi chú chi tiết kiện</label>
+          <input type="text" id="qrgen-desc" class="form-input" placeholder="VD: Thùng tủ + Cánh Acrylic + Phụ kiện ray bản lề">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="DRAWINGS_CLIENT.closeQrGenModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Sinh Tem QR</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var DRAWINGS_CLIENT = {
+    selectedOrderId: "",
+    filePayload: null,
+
+    onInit: function() {
+      var btnUp = document.getElementById("btn-upload-doc");
+      var btnQr = document.getElementById("btn-gen-pkg-qr");
+      if (btnUp) btnUp.style.display = (APP.hasPermission("drawing.upload") || APP.hasPermission("photo.upload")) ? "" : "none";
+      if (btnQr) btnQr.style.display = APP.hasPermission("package.qr_print") ? "" : "none";
+
+      var self = this;
+      var inp = document.getElementById("drw-file-input");
+      if (inp && !inp._bound) {
+        inp._bound = true;
+        inp.addEventListener("change", function(e) {
+          var f = e.target && e.target.files && e.target.files[0];
+          CARPENTRY_HELPER.readFileAsBase64(f, function(res) { self.filePayload = res; });
+        });
+      }
+      this.loadOrderChoices();
+    },
+
+    onReload: function() { this.loadOrderChoices(); },
+
+    selectOrder: function(oid) {
+      this.selectedOrderId = oid;
+      var sel = document.getElementById("draw-order-select");
+      if (sel) sel.value = oid;
+      this.loadDetail(oid);
+    },
+
+    loadOrderChoices: function() {
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          var sel = document.getElementById("draw-order-select");
+          if (!sel || !res || !res.success || !res.data) return;
+          var list = res.data.items || [];
+          sel.innerHTML = '<option value="">-- Chọn đơn hàng xem bản vẽ &amp; tem QR --</option>' +
+            list.map(function(o) { return '<option value="' + o.id + '">' + UTILS.escapeHtml(o.order_code + " - " + o.customer_name + " (" + o.title + ")") + '</option>'; }).join("");
+          if (!self.selectedOrderId && list.length > 0) self.selectedOrderId = list[0].id;
+          if (self.selectedOrderId) {
+            sel.value = self.selectedOrderId;
+            self.loadDetail(self.selectedOrderId);
+          }
+        })
+        .apiGetFurnitureOrders(AUTH.getToken(), {}, 1, 50);
+    },
+
+    loadDetail: function(oid) {
+      var self = this;
+      if (!oid) return;
+      this.selectedOrderId = oid;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) return;
+          self.renderFiles(res.data.files_photos || []);
+          self.renderPackages(res.data.packages_qr || []);
+        })
+        .apiGetFurnitureOrderDetail(AUTH.getToken(), oid);
+    },
+
+    renderFiles: function(files) {
+      var box = document.getElementById("draw-files-gallery");
+      if (!box) return;
+      if (!files.length) {
+        box.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Chưa có bản vẽ hoặc ảnh công trình nào.</div>';
+        return;
+      }
+      box.innerHTML = files.map(function(f) {
+        return '<div class="crp-gallery-card">' +
+          '<div style="font-size:11px;font-weight:700;color:#1d4ed8;">' + UTILS.escapeHtml(f.file_category) + '</div>' +
+          '<div style="font-weight:700;font-size:13px;margin:4px 0;">' + UTILS.escapeHtml(f.title_or_room) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px;">' + UTILS.escapeHtml(f.file_name) + '</div>' +
+          '<a href="' + UTILS.escapeHtml(f.drive_url) + '" target="_blank" class="btn btn-secondary btn-sm" style="display:block;text-align:center;text-decoration:none;">Mở file Drive</a>' +
+        '</div>';
+      }).join("");
+    },
+
+    renderPackages: function(pkgs) {
+      var box = document.getElementById("draw-packages-list");
+      if (!box) return;
+      if (!pkgs.length) {
+        box.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Chưa có tem QR kiện hàng nào. Bấm "Tạo Tem QR Kiện" khi đóng gói xong.</div>';
+        return;
+      }
+      box.innerHTML = pkgs.map(function(p) {
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;margin-bottom:8px;background:#fffbeb;">' +
+          '<div><strong style="color:#92400e;">' + UTILS.escapeHtml(p.qr_code) + '</strong> (Kiện ' + p.package_index + '/' + p.total_packages + ')<div style="font-size:12px;color:#78350f;">' + UTILS.escapeHtml(p.room_or_item + " • " + p.contents_desc) + '</div></div>' +
+          '<button type="button" class="btn btn-secondary btn-sm" onclick="CARPENTRY_HELPER.openQrScanModal(\'' + UTILS.escapeHtml(p.qr_code) + '\')">Thử quét</button>' +
+        '</div>';
+      }).join("");
+    },
+
+    openUploadModal: function() {
+      if (!this.selectedOrderId) { APP.showToast("Vui lòng chọn đơn hàng trước.", "warning"); return; }
+      this.filePayload = null;
+      var m = document.getElementById("modal-upload-drawing");
+      if (m) m.classList.add("open");
+    },
+
+    closeUploadModal: function() {
+      var m = document.getElementById("modal-upload-drawing");
+      if (m) m.classList.remove("open");
+    },
+
+    submitUpload: function(e) {
+      e.preventDefault();
+      var self = this;
+      if (!this.filePayload) { APP.showToast("Vui lòng chọn file cần tải lên.", "warning"); return; }
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã lưu lên Google Drive!", "success");
+            self.closeUploadModal();
+            self.loadDetail(self.selectedOrderId);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi upload file.", "error");
+          }
+        })
+        .apiUploadOrderFileOrPhoto(AUTH.getToken(), {
+          order_id: this.selectedOrderId,
+          file_category: (document.getElementById("drw-category") || {}).value || "DRAWING_2D",
+          title_or_room: (document.getElementById("drw-title") || {}).value || "",
+          file_name: this.filePayload.file_name,
+          mime_type: this.filePayload.mime_type,
+          base64: this.filePayload.base64
+        });
+    },
+
+    openQrGenModal: function() {
+      if (!this.selectedOrderId) { APP.showToast("Vui lòng chọn đơn hàng trước.", "warning"); return; }
+      var m = document.getElementById("modal-gen-pkg-qr");
+      if (m) m.classList.add("open");
+    },
+
+    closeQrGenModal: function() {
+      var m = document.getElementById("modal-gen-pkg-qr");
+      if (m) m.classList.remove("open");
+    },
+
+    submitQrGen: function(e) {
+      e.preventDefault();
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã tạo tem QR kiện hàng!", "success");
+            self.closeQrGenModal();
+            self.loadDetail(self.selectedOrderId);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi tạo tem QR.", "error");
+          }
+        })
+        .apiGenerateOrScanPackageQr(AUTH.getToken(), {
+          mode: "GENERATE",
+          order_id: this.selectedOrderId,
+          room_or_item: (document.getElementById("qrgen-room") || {}).value || "",
+          total_packages: Number((document.getElementById("qrgen-count") || {}).value) || 1,
+          contents_desc: (document.getElementById("qrgen-desc") || {}).value || ""
+        });
+    }
+  };
+  APP.registerModule("drawings", DRAWINGS_CLIENT, "view-drawings");
+</script>

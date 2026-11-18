@@ -1,0 +1,311 @@
+<!-- =========================================================================
+     VIEW: LẮP ĐẶT, NGHIỆM THU BÀN GIAO & BẢO HÀNH (`view-install-warranty`)
+     ========================================================================= -->
+<div id="view-install-warranty" class="content-view" style="display:none;">
+  <div class="crp-chip-bar">
+    <button type="button" class="crp-chip-btn active" id="tab-iw-install" onclick="INSTALL_WARRANTY_CLIENT.switchTab('install')">🚚 Lắp đặt &amp; Nghiệm thu</button>
+    <button type="button" class="crp-chip-btn" id="tab-iw-warranty" onclick="INSTALL_WARRANTY_CLIENT.switchTab('warranty')">🛠️ Phiếu Bảo hành sau giao</button>
+  </div>
+
+  <!-- TAB 1: LẮP ĐẶT & NGHIỆM THU -->
+  <div id="panel-iw-install" class="table-card">
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mã Đơn &amp; Địa chỉ công trình</th>
+            <th>Chủ đầu tư</th>
+            <th>Trạng thái &amp; Thanh toán</th>
+            <th style="text-align:right;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="iw-install-tbody"></tbody>
+      </table>
+    </div>
+    <div id="iw-install-pagination" class="pagination-wrapper" style="display:none;"></div>
+  </div>
+
+  <!-- TAB 2: BẢO HÀNH & SỬA CHỮA -->
+  <div id="panel-iw-warranty" style="display:none;">
+    <div class="toolbar-card">
+      <div class="toolbar-left">
+        <div class="search-box">
+          <input type="text" id="wrn-search-input" class="form-input" placeholder="🔍 Tìm mã BH-, mã đơn NT-, tên khách..." onkeydown="if(event.key==='Enter') INSTALL_WARRANTY_CLIENT.loadWarranties(1)">
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <button type="button" id="btn-new-warranty" class="btn btn-primary" onclick="INSTALL_WARRANTY_CLIENT.openWarrantyModal()">+ Mở Phiếu Bảo Hành</button>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Mã BH &amp; Đơn gốc</th>
+              <th>Chủ đầu tư &amp; Địa chỉ</th>
+              <th>Mô tả sự cố</th>
+              <th>Trạng thái</th>
+              <th style="text-align:right;">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="wrn-tbody"></tbody>
+        </table>
+      </div>
+      <div id="wrn-pagination" class="pagination-wrapper" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Ký Biên Bản Nghiệm Thu Bàn Giao -->
+<div id="modal-acceptance" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:480px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#ecfdf5;color:#059669;">✅</div>
+        <div>
+          <h3 class="modal-title">Biên Bản Nghiệm Thu Bàn Giao</h3>
+          <div class="modal-subtitle">Xác nhận hoàn thiện, thu đợt cuối &amp; kích hoạt bảo hành</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="INSTALL_WARRANTY_CLIENT.closeAcceptModal()">✕</button>
+    </div>
+    <form onsubmit="INSTALL_WARRANTY_CLIENT.submitAcceptance(event)">
+      <div class="modal-body" style="padding:18px;">
+        <input type="hidden" id="acc-order-id">
+        <div class="form-group">
+          <label class="form-label required" for="acc-signer">Người ký nghiệm thu (Khách hàng)</label>
+          <input type="text" id="acc-signer" class="form-input" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="acc-final-amt">Thu nốt tiền đợt cuối tại công trình (nếu có)</label>
+          <input type="number" id="acc-final-amt" class="form-input" min="0" value="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="acc-notes">Ghi chú bàn giao</label>
+          <textarea id="acc-notes" class="form-input" rows="2">Khách hàng đã kiểm tra toàn bộ hạng mục &amp; đồng ý nghiệm thu hoàn tất.</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="INSTALL_WARRANTY_CLIENT.closeAcceptModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Hoàn tất &amp; Kích hoạt BH</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL: Mở Phiếu Bảo Hành -->
+<div id="modal-warranty-form" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:480px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#fff1f2;color:#be123c;">🛠️</div>
+        <div>
+          <h3 class="modal-title">Mở Phiếu Bảo Hành Công Trình</h3>
+          <div class="modal-subtitle">Liên kết trực tiếp với đơn hàng gốc đã bàn giao</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="INSTALL_WARRANTY_CLIENT.closeWarrantyModal()">✕</button>
+    </div>
+    <form onsubmit="INSTALL_WARRANTY_CLIENT.submitWarranty(event)">
+      <div class="modal-body" style="padding:18px;">
+        <div class="form-group">
+          <label class="form-label required" for="wrn-order-code">Mã đơn hàng gốc (VD: NT-...)</label>
+          <input type="text" id="wrn-order-code" class="form-input" placeholder="NT-20261118-001" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="wrn-issue-desc">Mô tả sự cố cần bảo hành</label>
+          <textarea id="wrn-issue-desc" class="form-input" rows="3" placeholder="VD: Xệ cánh tủ bếp trên bên phải, kẹt ray ngăn kéo..." required></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="INSTALL_WARRANTY_CLIENT.closeWarrantyModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu Phiếu Bảo Hành</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var INSTALL_WARRANTY_CLIENT = {
+    instPage: 1,
+    wrnPage: 1,
+    pageSize: 10,
+
+    onInit: function() {
+      var btnW = document.getElementById("btn-new-warranty");
+      if (btnW) btnW.style.display = APP.hasPermission("warranty.manage") ? "" : "none";
+      this.loadInstallOrders(1);
+    },
+
+    onReload: function() { this.loadInstallOrders(this.instPage); },
+
+    switchTab: function(tab) {
+      var isInst = tab === "install";
+      document.getElementById("tab-iw-install").classList.toggle("active", isInst);
+      document.getElementById("tab-iw-warranty").classList.toggle("active", !isInst);
+      document.getElementById("panel-iw-install").style.display = isInst ? "" : "none";
+      document.getElementById("panel-iw-warranty").style.display = isInst ? "none" : "";
+      if (isInst) this.loadInstallOrders(1);
+      else this.loadWarranties(1);
+    },
+
+    loadInstallOrders: function(page) {
+      var self = this;
+      this.instPage = page || 1;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          var tbody = document.getElementById("iw-install-tbody");
+          if (!tbody || !res || !res.success || !res.data) return;
+          var list = (res.data.items || []).filter(function(o) {
+            return o.status === "READY_TO_SHIP" || o.status === "INSTALLING" || o.status === "COMPLETED";
+          });
+          var canDel = APP.hasPermission("delivery.update");
+          var canAcc = APP.hasPermission("acceptance.sign");
+          tbody.innerHTML = list.map(function(o) {
+            var act = "";
+            if (o.status === "READY_TO_SHIP" && canDel) {
+              act = '<button type="button" class="btn btn-secondary btn-sm" onclick="INSTALL_WARRANTY_CLIENT.shipOrder(\'' + o.id + '\',false)">🚚 Xuất đi lắp</button>';
+            } else if (o.status === "INSTALLING" && canAcc) {
+              act = '<button type="button" class="btn btn-primary btn-sm" onclick="INSTALL_WARRANTY_CLIENT.openAcceptModal(\'' + o.id + '\',\'' + UTILS.escapeHtml(o.customer_name) + '\',' + (o.debt_amount || 0) + ')">✅ Nghiệm thu</button>';
+            } else if (o.status === "COMPLETED") {
+              act = '<span style="font-size:12px;color:#059669;">BH đến: ' + CARPENTRY_HELPER.formatDateVi(o.warranty_until_date) + '</span>';
+            }
+            return '<tr>' +
+              '<td><code>' + UTILS.escapeHtml(o.order_code) + '</code><div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(o.site_address || "") + '</div></td>' +
+              '<td><strong>' + UTILS.escapeHtml(o.customer_name) + '</strong><div style="font-size:12px;">' + UTILS.escapeHtml(o.customer_phone) + '</div></td>' +
+              '<td>' + CARPENTRY_HELPER.renderStatusBadge(o.status, o.status_label, o.status_emoji, o.status_color, o.status_bg) + '<div style="font-size:12px;margin-top:3px;">Còn nợ: <strong>' + UTILS.formatCurrency(o.debt_amount) + '</strong></div></td>' +
+              '<td style="text-align:right;">' + act + '</td>' +
+            '</tr>';
+          }).join("") || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px;">Chưa có đơn hàng nào sẵn sàng giao lắp.</td></tr>';
+          APP.renderPagination("iw-install-pagination", res.data.pagination, function(p) { self.loadInstallOrders(p); });
+        })
+        .apiGetFurnitureOrders(AUTH.getToken(), {}, this.instPage, this.pageSize);
+    },
+
+    shipOrder: function(oid, overridePay) {
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã chuyển sang Đang lắp đặt!", "success");
+            self.loadInstallOrders(self.instPage);
+          } else if (res && res.errorCode === "STAGE2_UNPAID") {
+            APP.showToast(res.message, "warning");
+          } else {
+            APP.showToast((res && res.error) || "Không thể chuyển giao lắp.", "error");
+          }
+        })
+        .apiUpdateDeliveryInstallStatus(AUTH.getToken(), { order_id: oid, status: "INSTALLING", override_payment_check: !!overridePay });
+    },
+
+    openAcceptModal: function(oid, signerName, debtAmt) {
+      document.getElementById("acc-order-id").value = oid;
+      document.getElementById("acc-signer").value = signerName || "";
+      document.getElementById("acc-final-amt").value = debtAmt || 0;
+      var m = document.getElementById("modal-acceptance");
+      if (m) m.classList.add("open");
+    },
+
+    closeAcceptModal: function() {
+      var m = document.getElementById("modal-acceptance");
+      if (m) m.classList.remove("open");
+    },
+
+    submitAcceptance: function(e) {
+      e.preventDefault();
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã hoàn tất nghiệm thu & kích hoạt bảo hành!", "success");
+            self.closeAcceptModal();
+            self.loadInstallOrders(self.instPage);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi nghiệm thu.", "error");
+          }
+        })
+        .apiCompleteOrderAcceptance(AUTH.getToken(), {
+          order_id: (document.getElementById("acc-order-id") || {}).value || "",
+          acceptance_signer: (document.getElementById("acc-signer") || {}).value || "",
+          final_payment_amount: Number((document.getElementById("acc-final-amt") || {}).value) || 0,
+          acceptance_notes: (document.getElementById("acc-notes") || {}).value || ""
+        });
+    },
+
+    loadWarranties: function(page) {
+      var self = this;
+      this.wrnPage = page || 1;
+      var kw = (document.getElementById("wrn-search-input") || {}).value || "";
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          var tbody = document.getElementById("wrn-tbody");
+          if (!tbody || !res || !res.success || !res.data) return;
+          var list = res.data.items || [];
+          var canEdit = APP.hasPermission("warranty.manage");
+          tbody.innerHTML = list.map(function(w) {
+            var btn = (canEdit && w.status !== "RESOLVED" && w.status !== "CLOSED")
+              ? '<button type="button" class="btn btn-primary btn-sm" onclick="INSTALL_WARRANTY_CLIENT.resolveWarranty(\'' + w.id + '\')">Đánh dấu Xong</button>'
+              : '';
+            return '<tr>' +
+              '<td><code>' + UTILS.escapeHtml(w.ticket_code) + '</code><div style="font-size:12px;">Đơn: ' + UTILS.escapeHtml(w.order_code) + '</div></td>' +
+              '<td><strong>' + UTILS.escapeHtml(w.customer_name) + '</strong><div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(w.site_address || "") + '</div></td>' +
+              '<td style="font-size:12.5px;">' + UTILS.escapeHtml(w.issue_desc) + '</td>' +
+              '<td><span class="crp-badge">' + UTILS.escapeHtml(w.status) + '</span></td>' +
+              '<td style="text-align:right;">' + btn + '</td>' +
+            '</tr>';
+          }).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">Chưa có phiếu bảo hành nào.</td></tr>';
+          APP.renderPagination("wrn-pagination", res.data.pagination, function(p) { self.loadWarranties(p); });
+        })
+        .apiGetWarrantyTickets(AUTH.getToken(), { keyword: kw }, this.wrnPage, this.pageSize);
+    },
+
+    openWarrantyModal: function() {
+      var m = document.getElementById("modal-warranty-form");
+      if (m) m.classList.add("open");
+    },
+
+    closeWarrantyModal: function() {
+      var m = document.getElementById("modal-warranty-form");
+      if (m) m.classList.remove("open");
+    },
+
+    submitWarranty: function(e) {
+      e.preventDefault();
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã mở phiếu bảo hành!", "success");
+            self.closeWarrantyModal();
+            self.loadWarranties(1);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi tạo phiếu bảo hành.", "error");
+          }
+        })
+        .apiSaveWarrantyTicket(AUTH.getToken(), {
+          order_code: (document.getElementById("wrn-order-code") || {}).value || "",
+          issue_desc: (document.getElementById("wrn-issue-desc") || {}).value || ""
+        });
+    },
+
+    resolveWarranty: function(wid) {
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast("Đã xử lý xong bảo hành!", "success");
+            self.loadWarranties(self.wrnPage);
+          }
+        })
+        .apiSaveWarrantyTicket(AUTH.getToken(), { id: wid, status: "RESOLVED", repair_notes: "Đã cân chỉnh & xử lý hoàn tất tại nhà khách" });
+    }
+  };
+  APP.registerModule("install-warranty", INSTALL_WARRANTY_CLIENT, "view-install-warranty");
+</script>

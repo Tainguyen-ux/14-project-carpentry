@@ -4408,4 +4408,126 @@
     to { transform: rotate(360deg); }
   }
 
+  /* =========================================================================
+     XƯỞNG MỘC & NỘI THẤT MAY ĐO (MVP) — MOBILE-FIRST RESPONSIVE STYLES
+     ========================================================================= */
+  .crp-hero-card {
+    background: linear-gradient(135deg, #451a03 0%, #92400e 60%, #b45309 100%);
+    color: #ffffff;
+    border-radius: 16px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    box-shadow: 0 10px 26px rgba(69, 26, 3, 0.24);
+  }
+  .crp-hero-title { margin: 0 0 4px 0; font-size: 20px; font-weight: 800; }
+  .crp-hero-sub { margin: 0; font-size: 13px; color: rgba(255, 255, 255, 0.9); }
+  .crp-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn-crp-hero {
+    background: #fbbf24; color: #451a03; border: none; border-radius: 10px;
+    padding: 9px 14px; font-size: 13px; font-weight: 800; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+  }
+  .btn-crp-glass {
+    background: rgba(255, 255, 255, 0.16); color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 10px;
+    padding: 8px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  }
+  .crp-kpi-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px; margin-bottom: 14px;
+  }
+  .crp-kpi-card {
+    background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px;
+    padding: 13px 15px; display: flex; align-items: center; gap: 12px;
+    cursor: pointer; transition: transform 0.14s ease, box-shadow 0.14s ease;
+  }
+  .crp-kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08); }
+  .crp-kpi-icon {
+    width: 42px; height: 42px; border-radius: 12px; display: flex;
+    align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0;
+  }
+  .crp-kpi-label { display: block; font-size: 11.5px; font-weight: 700; color: #64748b; }
+  .crp-kpi-val { display: block; font-size: 18px; font-weight: 800; color: #0f172a; line-height: 1.25; }
+  .crp-split-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;
+  }
+  .crp-panel-card {
+    background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden;
+  }
+  .crp-panel-header {
+    padding: 12px 16px; background: #fffbeb; border-bottom: 1px solid #fde68a;
+    display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 13.5px; color: #78350f;
+  }
+  .crp-panel-body { padding: 12px 14px; }
+  .crp-chip-bar { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+  .crp-chip-btn {
+    padding: 6px 12px; border-radius: 999px; border: 1px solid #cbd5e1;
+    background: #ffffff; color: #334155; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .crp-chip-btn.active { background: #92400e; border-color: #92400e; color: #ffffff; }
+  .crp-badge {
+    display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;
+    border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap;
+  }
+  .crp-progress-bar {
+    height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin: 6px 0;
+  }
+  .crp-progress-fill {
+    height: 100%; background: linear-gradient(90deg, #b45309, #10b981); border-radius: 999px; transition: width 0.25s ease;
+  }
+  .crp-mobile-list { display: none; flex-direction: column; gap: 10px; padding: 12px; }
+  .crp-mobile-card {
+    background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 13px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+  }
+  .crp-gallery-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+  }
+  .crp-gallery-card { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #ffffff; padding: 8px; }
+  .modal-tabs-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .modal-tab-btn {
+    padding: 7px 12px; border-radius: 8px; border: 1px solid #cbd5e1;
+    background: #ffffff; color: #334155; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  }
+  .modal-tab-btn.active { background: #92400e; border-color: #92400e; color: #ffffff; }
+  .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .crp-bottom-nav {
+    display: none; position: fixed; bottom: 0; left: 0; right: 0; height: 64px;
+    background: #ffffff; border-top: 1px solid #e2e8f0; box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.08);
+    z-index: 990; justify-content: space-around; align-items: center; padding: 0 6px;
+  }
+  .crp-bottom-btn {
+    border: none; background: transparent; color: #64748b; font-size: 11px; font-weight: 600;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; flex: 1; cursor: pointer; padding: 6px 4px;
+  }
+  .crp-bottom-btn.active { color: #92400e; font-weight: 700; }
+  .crp-bottom-fab {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: linear-gradient(135deg, #451a03 0%, #b45309 100%);
+    color: #ffffff; display: flex; align-items: center; justify-content: center;
+    margin-top: -16px; box-shadow: 0 4px 12px rgba(146, 64, 14, 0.4);
+  }
+  .btn-header-crp {
+    display: inline-flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 9px;
+    border: 1px solid #fde68a; background: #fffbeb; color: #92400e;
+    font-size: 12.5px; font-weight: 700; cursor: pointer;
+  }
+
+  @media (max-width: 768px) {
+    .crp-bottom-nav { display: flex !important; }
+    .app-main-content { padding-bottom: 84px !important; }
+    .crp-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    .crp-split-grid, .form-row-2, .form-row-3 { grid-template-columns: 1fr !important; }
+    .crp-desktop-table { display: none !important; }
+    .crp-mobile-list { display: flex !important; }
+    .btn-header-crp span { display: none !important; }
+  }
+
 </style>

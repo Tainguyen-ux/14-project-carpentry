@@ -445,6 +445,9 @@ handleNavClick: function(itemEl) {
 
       this.currentModule = module;
       this.startPageLoading(module, title);
+      document.querySelectorAll(".crp-bottom-btn[data-target]").forEach(function(b) {
+        b.classList.toggle("active", b.getAttribute("data-target") === module);
+      });
 
       // 3. Cập nhật Breadcrumb & Tiêu đề
       var breadcrumbEl = document.getElementById("content-breadcrumb");
@@ -619,6 +622,19 @@ handleNavClick: function(itemEl) {
           return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>';
         case "settings":
           return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"></path></svg>';
+        case "ruler":
+        case "layers":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>';
+        case "wrench":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
+        case "package":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>';
+        case "credit-card":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>';
+        case "truck":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>';
+        case "bar-chart":
+          return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>';
         default:
           return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>';
       }
@@ -768,6 +784,73 @@ handleNavClick: function(itemEl) {
         var isAdmin = user.is_admin || (user.permissions && user.permissions.indexOf("*") !== -1) || 
                       (user.roles && user.roles.some(function(r) { return r.code === "Admin" || r.id === "ROLE_ADMIN"; }));
         clearCacheBtn.style.display = isAdmin ? "flex" : "none";
+      }
+
+      var hdrSurvey = document.getElementById("btn-header-quick-survey");
+      var hdrQr = document.getElementById("btn-header-quick-qr");
+      var dashSurvey = document.getElementById("btn-dash-new-survey");
+      var dashOrder = document.getElementById("btn-dash-new-order");
+      if (hdrSurvey) hdrSurvey.style.display = this.hasPermission("survey.create") ? "inline-flex" : "none";
+      if (hdrQr) hdrQr.style.display = (this.hasPermission("delivery.update") || this.hasPermission("drawing.view") || this.hasPermission("order.view")) ? "inline-flex" : "none";
+      if (dashSurvey) dashSurvey.style.display = this.hasPermission("survey.create") ? "" : "none";
+      if (dashOrder) dashOrder.style.display = this.hasPermission("quotation.create") ? "" : "none";
+    },
+
+    loadDashboard: function() {
+      var self = this;
+      var token = self.token || (window.AUTH && AUTH.getToken());
+      if (!token) { self.stopPageLoading(); return; }
+      if (typeof google !== "undefined" && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function(res) {
+            self.stopPageLoading();
+            if (res && res.success && res.data) self.renderDashboard(res.data);
+          })
+          .withFailureHandler(function() { self.stopPageLoading(); })
+          .apiGetCarpentryDashboard(token);
+      } else {
+        self.stopPageLoading();
+      }
+    },
+
+    renderDashboard: function(data) {
+      if (!data) return;
+      var k = data.kpi || {};
+      var setTxt = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+      setTxt("dash-kpi-inprod", UTILS.formatNumber(k.in_production_count || 0));
+      setTxt("dash-kpi-installing", UTILS.formatNumber(k.installing_count || 0));
+      setTxt("dash-kpi-upcoming", UTILS.formatNumber(k.upcoming_due_count || 0));
+      setTxt("dash-kpi-delayed", UTILS.formatNumber(k.delayed_or_urgent_count || 0));
+      setTxt("dash-kpi-value", UTILS.formatCurrency(k.active_orders_value || 0));
+      setTxt("dash-kpi-debt", UTILS.formatCurrency(k.total_debt_receivable || 0));
+      setTxt("dash-kpi-drawing", UTILS.formatNumber(k.awaiting_drawing_count || 0) + " đơn");
+      setTxt("dash-kpi-lowstock", UTILS.formatNumber(k.low_stock_materials_count || 0) + " mã VT");
+
+      var urgEl = document.getElementById("dash-urgent-orders");
+      var urgList = data.urgent_orders || [];
+      if (urgEl) {
+        urgEl.innerHTML = urgList.length
+          ? urgList.map(function(o) {
+              return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;">' +
+                '<div><code>' + UTILS.escapeHtml(o.order_code) + '</code> <strong>' + UTILS.escapeHtml(o.customer_name + " — " + o.title) + '</strong><div style="font-size:12px;color:#b91c1c;">Hạn giao: ' + CARPENTRY_HELPER.formatDateVi(o.due_date) + ' • ' + UTILS.escapeHtml(o.current_stage_summary) + ' (' + (o.completion_pct || 0) + '%)</div></div>' +
+                CARPENTRY_HELPER.renderStatusBadge(o.status, o.is_late ? "Trễ tiến độ!" : o.status_label, o.status_emoji, o.status_color, o.status_bg) +
+              '</div>';
+            }).join("")
+          : '<div style="text-align:center;color:var(--text-muted);padding:14px;font-size:13px;">✅ Không có công trình trễ hạn hoặc cận hạn gấp.</div>';
+      }
+
+      var duePayEl = document.getElementById("dash-due-payments");
+      var payList = data.due_payments || [];
+      if (duePayEl) {
+        duePayEl.innerHTML = payList.length
+          ? payList.map(function(p) {
+              var rem = Math.max(0, (Number(p.due_amount) || 0) - (Number(p.paid_amount) || 0));
+              return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;">' +
+                '<div><code>' + UTILS.escapeHtml(p.order_code) + '</code> <strong>' + UTILS.escapeHtml(p.customer_name) + '</strong><div style="font-size:12px;color:#64748b;">' + UTILS.escapeHtml(p.stage_name) + '</div></div>' +
+                '<strong style="color:#b45309;">' + UTILS.formatCurrency(rem) + '</strong>' +
+              '</div>';
+            }).join("")
+          : '<div style="text-align:center;color:var(--text-muted);padding:14px;font-size:13px;">Chưa có đợt thanh toán nào đến hạn.</div>';
       }
     },
 
@@ -1134,6 +1217,183 @@ handleNavClick: function(itemEl) {
       }
     }
   };
+
+  // =========================================================================
+  // CARPENTRY SHARED CLIENT HELPER (Meta Cache, QR Package Scan, Drive Upload)
+  // =========================================================================
+  var CARPENTRY_HELPER = {
+    metaCache: null,
+
+    loadMeta: function(cb, force) {
+      if (!force && this.metaCache) {
+        if (cb) cb(this.metaCache);
+        return;
+      }
+      var token = AUTH.getToken();
+      if (!token) {
+        if (cb) cb(null);
+        return;
+      }
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (res && res.success && res.data) {
+            self.metaCache = res.data;
+            if (cb) cb(res.data);
+          } else {
+            if (cb) cb(null);
+          }
+        })
+        .withFailureHandler(function() {
+          if (cb) cb(null);
+        })
+        .apiGetCarpentryMeta(token);
+    },
+
+    formatDateVi: function(ymd) {
+      if (!ymd) return "";
+      var s = String(ymd).trim().slice(0, 10);
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) return m[3] + "/" + m[2] + "/" + m[1];
+      return s;
+    },
+
+    renderStatusBadge: function(st, label, emoji, color, bg) {
+      var text = (emoji ? emoji + " " : "") + (label || st || "");
+      var c = color || "#334155";
+      var b = bg || "#f1f5f9";
+      return '<span class="crp-badge" style="color:' + c + ';background:' + b + ';border:1px solid ' + c + '33;">' + UTILS.escapeHtml(text) + '</span>';
+    },
+
+    openQuickSurvey: function() {
+      if (!APP.hasPermission("survey.create")) {
+        APP.showToast("Bạn không có quyền lập phiếu khảo sát đo đạc.", "warning");
+        return;
+      }
+      APP.navigateTo("surveys");
+    },
+
+    openQrScanModal: function(prefill) {
+      var modal = document.getElementById("modal-crp-qr-scan");
+      if (!modal) return;
+      modal.classList.add("open");
+      var inp = document.getElementById("crp-qr-input");
+      if (inp) {
+        inp.value = prefill || "";
+        setTimeout(function() { try { inp.focus(); } catch (e) {} }, 60);
+      }
+      var box = document.getElementById("crp-qr-result");
+      if (box) {
+        box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted);text-align:center;padding:10px;">Nhập mã tem QR kiện hàng (VD: PK-NT-20261118-001-01) hoặc mã đơn hàng NT-... để mở nhanh bản vẽ 2D/3D trên Drive.</div>';
+      }
+      if (prefill) {
+        this.runQrScan();
+      }
+    },
+
+    closeQrScanModal: function() {
+      var modal = document.getElementById("modal-crp-qr-scan");
+      if (modal) modal.classList.remove("open");
+    },
+
+    runQrScan: function(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      var inp = document.getElementById("crp-qr-input");
+      var box = document.getElementById("crp-qr-result");
+      var code = inp ? String(inp.value || "").trim() : "";
+      if (!code) {
+        APP.showToast("Vui lòng nhập mã tem QR kiện hàng hoặc mã đơn NT-...", "warning");
+        return;
+      }
+      if (box) box.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);">Đang tra cứu kiện hàng &amp; bản vẽ Drive...</div>';
+
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (!box) return;
+          if (!res || !res.success || !res.data) {
+            box.innerHTML = '<div style="padding:12px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:13px;">' + UTILS.escapeHtml((res && res.error) || "Không tìm thấy kiện hàng hoặc đơn hàng.") + '</div>';
+            return;
+          }
+          var d = res.data;
+          var o = d.order;
+          var pkg = d.scanned_package;
+          var docs = d.drawings_and_photos || [];
+          var allPkgs = d.packages || [];
+
+          var html = '<div style="border:1px solid var(--border-color);border-radius:10px;padding:12px;background:#fffbeb;">';
+          if (pkg) {
+            html += '<div style="font-weight:800;font-size:14px;color:#92400e;margin-bottom:4px;">📦 ' + UTILS.escapeHtml(pkg.qr_code) + ' — Kiện ' + pkg.package_index + ' / ' + allPkgs.length + '</div>';
+            html += '<div style="font-size:12.5px;color:#78350f;margin-bottom:6px;">Hạng mục/Phòng: <strong>' + UTILS.escapeHtml(pkg.room_or_item) + '</strong> (' + UTILS.escapeHtml(pkg.contents_desc) + ')</div>';
+          }
+          if (o) {
+            html += '<div style="padding-top:8px;border-top:1px dashed #fcd34d;font-size:12.5px;">' +
+              '<div><strong>' + UTILS.escapeHtml(o.order_code) + '</strong> • ' + UTILS.escapeHtml(o.customer_name) + '</div>' +
+              '<div style="color:var(--text-muted);margin-bottom:6px;">📍 ' + UTILS.escapeHtml(o.site_address || "") + '</div>' +
+              '<div>Bản vẽ &amp; Ảnh Drive: <strong>' + docs.length + ' tài liệu</strong></div>';
+            if (docs.length > 0) {
+              html += '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">' +
+                docs.slice(0, 4).map(function(f) {
+                  return '<a href="' + UTILS.escapeHtml(f.drive_url) + '" target="_blank" style="font-size:11.5px;padding:4px 8px;border-radius:6px;background:#ffffff;border:1px solid #cbd5e1;text-decoration:none;color:#1d4ed8;">📐 ' + UTILS.escapeHtml(f.title_or_room || f.file_name) + '</a>';
+                }).join("") +
+              '</div>';
+            }
+            html += '<div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" id="crp-qr-open-drawings-btn">Mở hồ sơ Đơn &amp; Bản vẽ</button></div>';
+            html += '</div>';
+          }
+          html += '</div>';
+          box.innerHTML = html;
+
+          if (o) {
+            var btn = document.getElementById("crp-qr-open-drawings-btn");
+            if (btn) {
+              btn.onclick = function() {
+                self.closeQrScanModal();
+                APP.navigateTo("drawings");
+                setTimeout(function() {
+                  if (window.DRAWINGS_CLIENT && typeof window.DRAWINGS_CLIENT.selectOrder === "function") {
+                    window.DRAWINGS_CLIENT.selectOrder(o.id);
+                  }
+                }, 120);
+              };
+            }
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (box) box.innerHTML = '<div style="color:#b91c1c;padding:8px;">Lỗi kết nối: ' + UTILS.escapeHtml(err && err.message ? err.message : String(err)) + '</div>';
+        })
+        .apiGenerateOrScanPackageQr(AUTH.getToken(), { mode: "SCAN", code: code });
+    },
+
+    copyToClipboard: function(txt) {
+      if (!txt) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(String(txt)).then(function() {
+          APP.showToast("Đã sao chép: " + txt, "success");
+        }).catch(function() {
+          APP.showToast("Nội dung: " + txt, "info");
+        });
+      } else {
+        APP.showToast("Nội dung: " + txt, "info");
+      }
+    },
+
+    readFileAsBase64: function(file, cb) {
+      if (!file) { if (cb) cb(null); return; }
+      var reader = new FileReader();
+      reader.onload = function(evt) {
+        var result = (evt && evt.target && evt.target.result) || "";
+        var base64 = String(result).indexOf(",") >= 0 ? String(result).split(",")[1] : String(result);
+        if (cb) cb({ file_name: file.name || "file.jpg", mime_type: file.type || "image/jpeg", base64: base64 });
+      };
+      reader.onerror = function() {
+        APP.showToast("Không đọc được file tải lên.", "danger");
+        if (cb) cb(null);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  window.CARPENTRY_HELPER = CARPENTRY_HELPER;
 
   // Tự động khởi động APP khi trang web tải xong
   document.addEventListener("DOMContentLoaded", function() {

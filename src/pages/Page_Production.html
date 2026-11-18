@@ -1,0 +1,131 @@
+<!-- =========================================================================
+     VIEW: BẢNG TIẾN ĐỘ XƯỞNG CNC -> DÁN CẠNH -> SƠN -> QC (`view-production`)
+     ========================================================================= -->
+<div id="view-production" class="content-view" style="display:none;">
+  <div class="toolbar-card">
+    <div class="toolbar-left">
+      <div class="crp-chip-bar" style="margin:0;">
+        <button type="button" class="crp-chip-btn active" onclick="PRODUCTION_CLIENT.setFilter('IN_PRODUCTION', this)">🟣 Đang sản xuất</button>
+        <button type="button" class="crp-chip-btn" onclick="PRODUCTION_CLIENT.setFilter('DEPOSITED', this)">🔵 Chờ bản vẽ SX</button>
+        <button type="button" class="crp-chip-btn" onclick="PRODUCTION_CLIENT.setFilter('READY_TO_SHIP', this)">🟠 Xong QC - Chờ giao</button>
+      </div>
+    </div>
+    <div class="toolbar-right">
+      <button type="button" class="btn btn-secondary" onclick="PRODUCTION_CLIENT.loadBoard(1)">Tải lại</button>
+    </div>
+  </div>
+
+  <div id="prod-orders-grid" class="crp-split-grid"></div>
+  <div id="prod-empty" class="table-empty" style="display:none;">
+    <h4>Không có đơn hàng nào ở trạng thái sản xuất này</h4>
+    <p>Chuyển sang mục khác hoặc duyệt lệnh sản xuất từ màn hình Đơn hàng.</p>
+  </div>
+  <div id="prod-pagination" class="pagination-wrapper" style="display:none;"></div>
+</div>
+
+<script>
+  var PRODUCTION_CLIENT = {
+    page: 1,
+    pageSize: 10,
+    filterStatus: "IN_PRODUCTION",
+
+    onInit: function() {
+      var self = this;
+      CARPENTRY_HELPER.loadMeta(function() { self.loadBoard(1); });
+    },
+
+    onReload: function() { this.loadBoard(this.page); },
+
+    setFilter: function(st, btn) {
+      this.filterStatus = st;
+      document.querySelectorAll("#view-production .crp-chip-btn").forEach(function(b) { b.classList.remove("active"); });
+      if (btn) btn.classList.add("active");
+      this.loadBoard(1);
+    },
+
+    loadBoard: function(page) {
+      var self = this;
+      this.page = page || 1;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) return;
+          self.renderBoard(res.data.items || [], res.data.pagination);
+        })
+        .apiGetFurnitureOrders(AUTH.getToken(), { status: this.filterStatus }, this.page, this.pageSize);
+    },
+
+    renderBoard: function(orders, pagination) {
+      var grid = document.getElementById("prod-orders-grid");
+      var empty = document.getElementById("prod-empty");
+      if (!grid) return;
+      if (!orders.length) {
+        grid.innerHTML = "";
+        if (empty) empty.style.display = "";
+        APP.renderPagination("prod-pagination", null);
+        return;
+      }
+      if (empty) empty.style.display = "none";
+
+      grid.innerHTML = orders.map(function(o) {
+        return '<div class="crp-panel-card">' +
+          '<div class="crp-panel-header">' +
+            '<span><code>' + UTILS.escapeHtml(o.order_code) + '</code> — ' + UTILS.escapeHtml(o.customer_name) + '</span>' +
+            CARPENTRY_HELPER.renderStatusBadge(o.status, o.completion_pct + "%", "🏭", o.status_color, o.status_bg) +
+          '</div>' +
+          '<div class="crp-panel-body">' +
+            '<div style="font-size:13px;font-weight:700;margin-bottom:4px;">' + UTILS.escapeHtml(o.title) + '</div>' +
+            '<div style="font-size:12px;color:' + (o.is_late ? "#dc2626" : "#64748b") + ';margin-bottom:8px;">Hạn giao: ' + CARPENTRY_HELPER.formatDateVi(o.due_date) + ' • ' + UTILS.escapeHtml(o.current_stage_summary) + '</div>' +
+            '<div class="crp-progress-bar"><div class="crp-progress-fill" style="width:' + (o.completion_pct || 0) + '%;"></div></div>' +
+            '<div id="prod-items-' + o.id + '" style="margin-top:10px;font-size:12.5px;color:var(--text-muted);">Đang tải chi tiết hạng mục...</div>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+
+      var self = this;
+      orders.forEach(function(o) { self.loadOrderItemsInline(o.id); });
+      APP.renderPagination("prod-pagination", pagination, function(p, ps) { self.pageSize = ps || 10; self.loadBoard(p); });
+    },
+
+    loadOrderItemsInline: function(oid) {
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          var box = document.getElementById("prod-items-" + oid);
+          if (!box || !res || !res.success || !res.data) return;
+          var items = res.data.items || [];
+          var stages = (CARPENTRY_HELPER.metaCache && CARPENTRY_HELPER.metaCache.policy && CARPENTRY_HELPER.metaCache.policy.productionStages) || [];
+          var canUpdate = APP.hasPermission("production.stage_update");
+
+          box.innerHTML = items.map(function(it) {
+            var curIdx = stages.findIndex(function(s) { return s.code === it.production_stage; });
+            var nextStage = (curIdx >= 0 && curIdx + 1 < stages.length) ? stages[curIdx + 1] : null;
+            var btn = (canUpdate && nextStage)
+              ? '<button type="button" class="btn btn-primary btn-sm" onclick="PRODUCTION_CLIENT.advanceStage(\'' + it.id + '\',\'' + nextStage.code + '\')">👉 ' + UTILS.escapeHtml(nextStage.name) + '</button>'
+              : '<span style="color:#059669;font-weight:700;">✅ Xong QC</span>';
+            return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed #e2e8f0;">' +
+              '<div><strong>' + UTILS.escapeHtml(it.item_name) + '</strong><div style="font-size:11.5px;color:#64748b;">' + UTILS.escapeHtml(it.stage_label) + '</div></div>' +
+              btn +
+            '</div>';
+          }).join("");
+        })
+        .apiGetFurnitureOrderDetail(AUTH.getToken(), oid);
+    },
+
+    advanceStage: function(itemId, nextStageCode) {
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã cập nhật công đoạn!", "success");
+            self.loadBoard(self.page);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi cập nhật tiến độ.", "error");
+          }
+        })
+        .apiUpdateItemProductionStage(AUTH.getToken(), { order_item_id: itemId, to_stage: nextStageCode });
+    }
+  };
+  APP.registerModule("production", PRODUCTION_CLIENT, "view-production");
+</script>

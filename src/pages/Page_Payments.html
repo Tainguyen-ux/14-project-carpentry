@@ -1,0 +1,204 @@
+<!-- =========================================================================
+     VIEW: THANH TOÁN ĐỢT 1-2-3 & CÔNG NỢ HỢP ĐỒNG (`view-payments`)
+     ========================================================================= -->
+<div id="view-payments" class="content-view" style="display:none;">
+  <div class="toolbar-card">
+    <div class="toolbar-left">
+      <div class="search-box">
+        <input type="text" id="pay-search-input" class="form-input" placeholder="🔍 Tìm mã đơn NT-, mã thanh toán, tên khách..." onkeydown="if(event.key==='Enter') PAYMENTS_CLIENT.loadPayments(1)">
+      </div>
+      <select id="pay-filter-status" class="form-select" onchange="PAYMENTS_CLIENT.loadPayments(1)" style="width:auto;">
+        <option value="ALL">Tất cả đợt thanh toán</option>
+        <option value="DUE">🟡 Đến hạn cần thu</option>
+        <option value="PARTIAL">Thu một phần</option>
+        <option value="PAID">🟢 Đã thanh toán đủ</option>
+        <option value="NOT_DUE">⚪ Chưa đến hạn</option>
+      </select>
+    </div>
+    <div class="toolbar-right">
+      <button type="button" class="btn btn-secondary" onclick="PAYMENTS_CLIENT.loadPayments(1)">Tải lại</button>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-container crp-desktop-table">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mã Đợt &amp; Đơn hàng</th>
+            <th>Chủ đầu tư</th>
+            <th>Giai đoạn thanh toán</th>
+            <th>Phải thu / Đã thu</th>
+            <th>Trạng thái</th>
+            <th style="text-align:right;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="payments-tbody"></tbody>
+      </table>
+    </div>
+    <div id="payments-mobile-list" class="crp-mobile-list"></div>
+    <div id="payments-empty" class="table-empty" style="display:none;">
+      <h4>Chưa có đợt thanh toán nào</h4>
+      <p>Các đợt thanh toán Đợt 1 (Cọc) - Đợt 2 (Trước giao) - Đợt 3 (Nghiệm thu) sẽ tự sinh khi lập đơn hàng.</p>
+    </div>
+    <div id="payments-pagination" class="pagination-wrapper" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- MODAL: Xác nhận Thu Tiền Đợt -->
+<div id="modal-collect-pay" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:440px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#ecfdf5;color:#059669;">💵</div>
+        <div>
+          <h3 class="modal-title">Xác Nhận Thu Tiền Theo Đợt</h3>
+          <div class="modal-subtitle" id="cp-subtitle">Thu tiền hợp đồng &amp; tự động ghi sổ quỹ</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="PAYMENTS_CLIENT.closeCollectModal()">✕</button>
+    </div>
+    <form onsubmit="PAYMENTS_CLIENT.submitCollect(event)">
+      <div class="modal-body" style="padding:18px;">
+        <input type="hidden" id="cp-payment-id">
+        <div class="form-group">
+          <label class="form-label required" for="cp-amount">Số tiền thực thu (VNĐ)</label>
+          <input type="number" id="cp-amount" class="form-input" min="1" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="cp-channel">Hình thức thanh toán</label>
+          <select id="cp-channel" class="form-select">
+            <option value="BANK_TRANSFER">Chuyển khoản ngân hàng</option>
+            <option value="BANK_QR">Chuyển khoản QR</option>
+            <option value="CASH">Tiền mặt tại xưởng / công trình</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="cp-notes">Ghi chú phiếu thu</label>
+          <input type="text" id="cp-notes" class="form-input" placeholder="VD: Khách chuyển khoản Đợt 2 trước khi giao">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="PAYMENTS_CLIENT.closeCollectModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Xác nhận Đã Thu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var PAYMENTS_CLIENT = {
+    page: 1,
+    pageSize: 10,
+
+    onInit: function() { this.loadPayments(1); },
+    onReload: function() { this.loadPayments(this.page); },
+
+    loadPayments: function(page) {
+      var self = this;
+      this.page = page || 1;
+      var kw = (document.getElementById("pay-search-input") || {}).value || "";
+      var st = (document.getElementById("pay-filter-status") || {}).value || "ALL";
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) return;
+          self.renderList(res.data.items || [], res.data.pagination);
+        })
+        .apiGetOrderPayments(AUTH.getToken(), { keyword: kw, status: st }, this.page, this.pageSize);
+    },
+
+    renderList: function(items, pagination) {
+      var tbody = document.getElementById("payments-tbody");
+      var mob = document.getElementById("payments-mobile-list");
+      var empty = document.getElementById("payments-empty");
+      if (!items.length) {
+        if (tbody) tbody.innerHTML = "";
+        if (mob) mob.innerHTML = "";
+        if (empty) empty.style.display = "";
+        APP.renderPagination("payments-pagination", null);
+        return;
+      }
+      if (empty) empty.style.display = "none";
+
+      var canCollect = APP.hasPermission("payment.create");
+      var stMap = {
+        PAID: { label: "🟢 Đã thu đủ", bg: "#ecfdf5", color: "#059669" },
+        DUE: { label: "🟡 Đến hạn thu", bg: "#fffbeb", color: "#d97706" },
+        PARTIAL: { label: "🔵 Thu 1 phần", bg: "#eff6ff", color: "#2563eb" },
+        NOT_DUE: { label: "⚪ Chưa đến hạn", bg: "#f1f5f9", color: "#475569" }
+      };
+
+      if (tbody) {
+        tbody.innerHTML = items.map(function(p) {
+          var m = stMap[p.status] || stMap.NOT_DUE;
+          var rem = Math.max(0, (p.due_amount || 0) - (p.paid_amount || 0));
+          var btn = (canCollect && p.status !== "PAID" && rem > 0)
+            ? '<button type="button" class="btn btn-primary btn-sm" onclick="PAYMENTS_CLIENT.openCollectModal(\'' + p.id + '\',' + rem + ',\'' + UTILS.escapeHtml(p.order_code + " - " + p.stage_name) + '\')">Thu tiền</button>'
+            : '';
+          return '<tr>' +
+            '<td><code>' + UTILS.escapeHtml(p.payment_code) + '</code><div style="font-size:12px;color:#92400e;font-weight:700;">' + UTILS.escapeHtml(p.order_code) + '</div></td>' +
+            '<td><strong>' + UTILS.escapeHtml(p.customer_name) + '</strong></td>' +
+            '<td>' + UTILS.escapeHtml(p.stage_name) + ' (' + p.percent_share + '%)</td>' +
+            '<td><strong>' + UTILS.formatCurrency(p.due_amount) + '</strong><div style="font-size:12px;color:#059669;">Đã thu: ' + UTILS.formatCurrency(p.paid_amount) + '</div></td>' +
+            '<td>' + CARPENTRY_HELPER.renderStatusBadge(p.status, m.label, "", m.color, m.bg) + '</td>' +
+            '<td style="text-align:right;">' + btn + '</td>' +
+          '</tr>';
+        }).join("");
+      }
+      if (mob) {
+        mob.innerHTML = items.map(function(p) {
+          var rem = Math.max(0, (p.due_amount || 0) - (p.paid_amount || 0));
+          var btn = (canCollect && p.status !== "PAID" && rem > 0)
+            ? '<button type="button" class="btn btn-primary btn-sm" style="margin-top:8px;width:100%;" onclick="PAYMENTS_CLIENT.openCollectModal(\'' + p.id + '\',' + rem + ',\'' + UTILS.escapeHtml(p.order_code) + '\')">💵 Thu ' + UTILS.formatCurrency(rem) + '</button>'
+            : '';
+          return '<div class="crp-mobile-card">' +
+            '<div style="display:flex;justify-content:space-between;"><strong>' + UTILS.escapeHtml(p.order_code) + '</strong><span>' + p.percent_share + '%</span></div>' +
+            '<div style="font-size:13px;font-weight:700;">' + UTILS.escapeHtml(p.customer_name) + ' — ' + UTILS.escapeHtml(p.stage_name) + '</div>' +
+            '<div style="font-size:12.5px;margin-top:4px;">Phải thu: <strong>' + UTILS.formatCurrency(p.due_amount) + '</strong> • Đã thu: ' + UTILS.formatCurrency(p.paid_amount) + '</div>' +
+            btn +
+          '</div>';
+        }).join("");
+      }
+      var self = this;
+      APP.renderPagination("payments-pagination", pagination, function(p, ps) { self.pageSize = ps || 10; self.loadPayments(p); });
+    },
+
+    openCollectModal: function(payId, remAmt, subtitle) {
+      document.getElementById("cp-payment-id").value = payId;
+      document.getElementById("cp-amount").value = remAmt;
+      var sub = document.getElementById("cp-subtitle");
+      if (sub) sub.textContent = subtitle || "";
+      var m = document.getElementById("modal-collect-pay");
+      if (m) m.classList.add("open");
+    },
+
+    closeCollectModal: function() {
+      var m = document.getElementById("modal-collect-pay");
+      if (m) m.classList.remove("open");
+    },
+
+    submitCollect: function(e) {
+      e.preventDefault();
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã thu tiền thành công!", "success");
+            self.closeCollectModal();
+            self.loadPayments(self.page);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi thu tiền.", "error");
+          }
+        })
+        .apiCollectOrderPayment(AUTH.getToken(), {
+          payment_id: (document.getElementById("cp-payment-id") || {}).value || "",
+          amount: Number((document.getElementById("cp-amount") || {}).value) || 0,
+          payment_channel: (document.getElementById("cp-channel") || {}).value || "BANK_TRANSFER",
+          notes: (document.getElementById("cp-notes") || {}).value || ""
+        });
+    }
+  };
+  APP.registerModule("payments", PAYMENTS_CLIENT, "view-payments");
+</script>

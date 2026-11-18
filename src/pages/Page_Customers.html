@@ -1,0 +1,231 @@
+<!-- =========================================================================
+     VIEW: CHỦ ĐẦU TƯ, CÔNG TRÌNH & ĐỐI TÁC KTS (`view-customers`)
+     ========================================================================= -->
+<div id="view-customers" class="content-view" style="display:none;">
+  <div class="toolbar-card">
+    <div class="toolbar-left">
+      <div class="search-box">
+        <input type="text" id="cust-search-input" class="form-input" placeholder="🔍 Tìm tên khách, SĐT, địa chỉ công trình, KTS..." onkeydown="if(event.key==='Enter') CUSTOMERS_CLIENT.loadCustomers(1)">
+      </div>
+      <select id="cust-filter-type" class="form-select" onchange="CUSTOMERS_CLIENT.loadCustomers(1)" style="width:auto;">
+        <option value="ALL">Tất cả loại công trình</option>
+        <option value="APARTMENT">🏢 Chung cư</option>
+        <option value="TOWNHOUSE">🏠 Nhà phố</option>
+        <option value="VILLA">🏡 Biệt thự</option>
+        <option value="OFFICE">💼 Văn phòng</option>
+        <option value="SHOWROOM">🏪 Showroom</option>
+      </select>
+    </div>
+    <div class="toolbar-right">
+      <button type="button" class="btn btn-secondary" onclick="CUSTOMERS_CLIENT.loadCustomers(1)">Tải lại</button>
+      <button type="button" id="btn-cust-add" class="btn btn-primary" onclick="CUSTOMERS_CLIENT.openFormModal()">+ Thêm Chủ đầu tư</button>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-container crp-desktop-table">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mã KH &amp; Chủ đầu tư</th>
+            <th>SĐT &amp; Công trình thi công</th>
+            <th>Đối tác KTS / Lưu ý</th>
+            <th>Tổng giá trị HĐ</th>
+            <th>Đã thu / Còn nợ</th>
+            <th style="text-align:right;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="customers-tbody"></tbody>
+      </table>
+    </div>
+    <div id="customers-mobile-list" class="crp-mobile-list"></div>
+    <div id="customers-empty" class="table-empty" style="display:none;">
+      <h4>Chưa có hồ sơ chủ đầu tư nào</h4>
+      <p>Thêm khách hàng kèm địa chỉ công trình và lưu ý thang hàng/giờ hành chính trước khi đi khảo sát.</p>
+    </div>
+    <div id="customers-pagination" class="pagination-wrapper" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- MODAL: Thêm / Sửa Chủ Đầu Tư -->
+<div id="modal-cust-form" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:580px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#fffbeb;color:#b45309;">🏠</div>
+        <div>
+          <h3 class="modal-title" id="cust-modal-title">Thêm Chủ Đầu Tư &amp; Công Trình</h3>
+          <div class="modal-subtitle">Quản lý thông tin liên hệ, địa chỉ lắp đặt &amp; ghi chú thi công</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="CUSTOMERS_CLIENT.closeFormModal()">✕</button>
+    </div>
+    <form onsubmit="CUSTOMERS_CLIENT.submitForm(event)">
+      <div class="modal-body" style="padding:18px;">
+        <input type="hidden" id="cf-id">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label required" for="cf-name">Họ tên Chủ đầu tư</label>
+            <input type="text" id="cf-name" class="form-input" placeholder="VD: Anh Trần Quốc Bảo" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label required" for="cf-phone">Số điện thoại (Zalo)</label>
+            <input type="text" id="cf-phone" class="form-input" placeholder="09xxxxxxxx" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="cf-address">Địa chỉ công trình thi công</label>
+          <input type="text" id="cf-address" class="form-input" placeholder="VD: Căn hộ B12-08, Chung cư Cara River Park" required>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="cf-type">Loại công trình</label>
+            <select id="cf-type" class="form-select">
+              <option value="APARTMENT">🏢 Chung cư</option>
+              <option value="TOWNHOUSE">🏠 Nhà phố</option>
+              <option value="VILLA">🏡 Biệt thự</option>
+              <option value="OFFICE">💼 Văn phòng</option>
+              <option value="SHOWROOM">🏪 Showroom</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="cf-partner">KTS / Nhà thầu đối tác</label>
+            <input type="text" id="cf-partner" class="form-input" placeholder="VD: KTS Minh Khoa">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="cf-site-notes">Ghi chú đặc thù thi công</label>
+          <textarea id="cf-site-notes" class="form-input" rows="2" placeholder="VD: Chung cư chỉ cho thi công giờ hành chính, đăng ký thang hàng trước 1 ngày"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="CUSTOMERS_CLIENT.closeFormModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu Chủ Đầu Tư</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var CUSTOMERS_CLIENT = {
+    page: 1,
+    pageSize: 10,
+    listCache: [],
+
+    onInit: function() {
+      var btn = document.getElementById("btn-cust-add");
+      if (btn) btn.style.display = APP.hasPermission("customer.manage") ? "" : "none";
+      this.loadCustomers(1);
+    },
+
+    onReload: function() { this.loadCustomers(this.page); },
+
+    loadCustomers: function(page) {
+      var self = this;
+      this.page = page || 1;
+      var kw = (document.getElementById("cust-search-input") || {}).value || "";
+      var pt = (document.getElementById("cust-filter-type") || {}).value || "ALL";
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) return;
+          self.listCache = res.data.items || [];
+          self.renderList(self.listCache, res.data.pagination);
+        })
+        .apiGetCustomers(AUTH.getToken(), { keyword: kw, project_type: pt }, this.page, this.pageSize);
+    },
+
+    renderList: function(items, pagination) {
+      var tbody = document.getElementById("customers-tbody");
+      var mob = document.getElementById("customers-mobile-list");
+      var empty = document.getElementById("customers-empty");
+      if (!items.length) {
+        if (tbody) tbody.innerHTML = "";
+        if (mob) mob.innerHTML = "";
+        if (empty) empty.style.display = "";
+        APP.renderPagination("customers-pagination", null);
+        return;
+      }
+      if (empty) empty.style.display = "none";
+
+      var canEdit = APP.hasPermission("customer.manage");
+      if (tbody) {
+        tbody.innerHTML = items.map(function(c) {
+          var editBtn = canEdit
+            ? '<button type="button" class="btn btn-secondary btn-sm" onclick="CUSTOMERS_CLIENT.editCustomer(\'' + c.id + '\')">Sửa</button>'
+            : '';
+          return '<tr>' +
+            '<td><code>' + UTILS.escapeHtml(c.customer_code) + '</code><div style="font-weight:700;">' + UTILS.escapeHtml(c.full_name) + '</div></td>' +
+            '<td><strong>' + UTILS.escapeHtml(c.phone) + '</strong><div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(c.site_address) + '</div></td>' +
+            '<td><div>' + UTILS.escapeHtml(c.partner_name || "-") + '</div><div style="font-size:11.5px;color:#b45309;">' + UTILS.escapeHtml(c.site_notes || "") + '</div></td>' +
+            '<td><strong>' + UTILS.formatCurrency(c.total_contract_value) + '</strong><div style="font-size:12px;">' + (c.total_orders || 0) + ' đơn</div></td>' +
+            '<td><div style="color:#059669;font-size:12.5px;">Thu: ' + UTILS.formatCurrency(c.total_paid) + '</div><div style="color:#dc2626;font-size:12px;">Nợ: ' + UTILS.formatCurrency(c.debt_balance) + '</div></td>' +
+            '<td style="text-align:right;">' + editBtn + '</td>' +
+          '</tr>';
+        }).join("");
+      }
+      if (mob) {
+        mob.innerHTML = items.map(function(c) {
+          return '<div class="crp-mobile-card">' +
+            '<div style="display:flex;justify-content:space-between;"><code>' + UTILS.escapeHtml(c.customer_code) + '</code><span>' + UTILS.escapeHtml(c.phone) + '</span></div>' +
+            '<div style="font-weight:700;margin-top:4px;">' + UTILS.escapeHtml(c.full_name) + '</div>' +
+            '<div style="font-size:12px;color:var(--text-muted);">📍 ' + UTILS.escapeHtml(c.site_address) + '</div>' +
+            '<div style="font-size:12.5px;margin-top:6px;">HĐ: <strong>' + UTILS.formatCurrency(c.total_contract_value) + '</strong> • Nợ: <strong style="color:#dc2626;">' + UTILS.formatCurrency(c.debt_balance) + '</strong></div>' +
+          '</div>';
+        }).join("");
+      }
+      var self = this;
+      APP.renderPagination("customers-pagination", pagination, function(p, ps) { self.pageSize = ps || 10; self.loadCustomers(p); });
+    },
+
+    openFormModal: function(cust) {
+      document.getElementById("cf-id").value = cust ? cust.id : "";
+      document.getElementById("cf-name").value = cust ? cust.full_name : "";
+      document.getElementById("cf-phone").value = cust ? cust.phone : "";
+      document.getElementById("cf-address").value = cust ? (cust.site_address || "") : "";
+      document.getElementById("cf-type").value = cust ? (cust.project_type || "APARTMENT") : "APARTMENT";
+      document.getElementById("cf-partner").value = cust ? (cust.partner_name || "") : "";
+      document.getElementById("cf-site-notes").value = cust ? (cust.site_notes || "") : "";
+      var t = document.getElementById("cust-modal-title");
+      if (t) t.textContent = cust ? ("Sửa Chủ đầu tư " + cust.customer_code) : "Thêm Chủ Đầu Tư & Công Trình";
+      var m = document.getElementById("modal-cust-form");
+      if (m) m.classList.add("open");
+    },
+
+    editCustomer: function(id) {
+      var c = this.listCache.find(function(x) { return x.id === id; });
+      if (c) this.openFormModal(c);
+    },
+
+    closeFormModal: function() {
+      var m = document.getElementById("modal-cust-form");
+      if (m) m.classList.remove("open");
+    },
+
+    submitForm: function(e) {
+      e.preventDefault();
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã lưu chủ đầu tư!", "success");
+            self.closeFormModal();
+            self.loadCustomers(1);
+          } else {
+            APP.showToast((res && res.error) || "Không thể lưu chủ đầu tư.", "error");
+          }
+        })
+        .apiSaveCustomer(AUTH.getToken(), {
+          id: (document.getElementById("cf-id") || {}).value || "",
+          full_name: (document.getElementById("cf-name") || {}).value || "",
+          phone: (document.getElementById("cf-phone") || {}).value || "",
+          site_address: (document.getElementById("cf-address") || {}).value || "",
+          project_type: (document.getElementById("cf-type") || {}).value || "APARTMENT",
+          partner_name: (document.getElementById("cf-partner") || {}).value || "",
+          site_notes: (document.getElementById("cf-site-notes") || {}).value || ""
+        });
+    }
+  };
+  APP.registerModule("customers", CUSTOMERS_CLIENT, "view-customers");
+</script>

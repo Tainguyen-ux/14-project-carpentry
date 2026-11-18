@@ -1,0 +1,353 @@
+<!-- =========================================================================
+     VIEW: BÁO GIÁ & ĐƠN HÀNG SẢN XUẤT (`view-orders`)
+     ========================================================================= -->
+<div id="view-orders" class="content-view" style="display:none;">
+  <div class="toolbar-card">
+    <div class="toolbar-left">
+      <div class="search-box">
+        <input type="text" id="orders-search-input" class="form-input" placeholder="🔍 Tìm mã đơn NT-, tên khách, địa chỉ..." onkeydown="if(event.key==='Enter') ORDERS_CLIENT.loadOrders(1)">
+      </div>
+      <select id="orders-filter-status" class="form-select" onchange="ORDERS_CLIENT.loadOrders(1)" style="width:auto;">
+        <option value="ALL">Tất cả trạng thái</option>
+        <option value="QUOTED">Đã gửi báo giá</option>
+        <option value="DEPOSITED">Chốt cọc / Chờ bản vẽ</option>
+        <option value="IN_PRODUCTION">Đang sản xuất</option>
+        <option value="READY_TO_SHIP">Xong QC - Chờ giao</option>
+        <option value="INSTALLING">Đang lắp đặt</option>
+        <option value="COMPLETED">Hoàn tất bàn giao</option>
+      </select>
+    </div>
+    <div class="toolbar-right">
+      <button type="button" class="btn btn-secondary" onclick="ORDERS_CLIENT.loadOrders(1)">Tải lại</button>
+      <button type="button" id="btn-order-create" class="btn btn-primary" onclick="ORDERS_CLIENT.openCreateModal()">+ Lập Báo giá / Đơn hàng</button>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-container crp-desktop-table">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mã Đơn &amp; Hạn giao</th>
+            <th>Chủ đầu tư &amp; Công trình</th>
+            <th>Giá trị HĐ</th>
+            <th>Đã thu / Còn nợ</th>
+            <th>Tiến độ SX</th>
+            <th>Bản vẽ &amp; Trạng thái</th>
+            <th style="text-align:right;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="orders-tbody"></tbody>
+      </table>
+    </div>
+    <div id="orders-mobile-list" class="crp-mobile-list"></div>
+    <div id="orders-empty" class="table-empty" style="display:none;">
+      <h4>Chưa có đơn hàng / báo giá nào</h4>
+      <p>Nhấn "+ Lập Báo giá / Đơn hàng" để bóc tách hạng mục theo md / m2 / cái và chia lịch thanh toán 3 đợt.</p>
+    </div>
+    <div id="orders-pagination" class="pagination-wrapper" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- MODAL: Lập Báo Giá & Tạo Đơn Hàng May Đo (Hỗ trợ md / m2 / cái) -->
+<div id="modal-order-form" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:820px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#fffbeb;color:#92400e;">📋</div>
+        <div>
+          <h3 class="modal-title">Báo Giá Chi Tiết &amp; Tạo Đơn Sản Xuất</h3>
+          <div class="modal-subtitle">Tự động tính số lượng theo mét dài (md), mét vuông (m2) hoặc cái/bộ</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="ORDERS_CLIENT.closeCreateModal()">✕</button>
+    </div>
+    <form onsubmit="ORDERS_CLIENT.submitOrder(event)">
+      <div class="modal-body" style="padding:18px;max-height:75vh;overflow-y:auto;">
+        <input type="hidden" id="ord-survey-id">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label required" for="ord-customer-id">Chủ đầu tư</label>
+            <select id="ord-customer-id" class="form-select" required></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label required" for="ord-title">Tên công trình / Gói nội thất</label>
+            <input type="text" id="ord-title" class="form-input" placeholder="VD: Nội thất Căn hộ 2PN - Tủ bếp &amp; Tủ áo" required>
+          </div>
+        </div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label class="form-label required" for="ord-due-date">Ngày hẹn bàn giao</label>
+            <input type="date" id="ord-due-date" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ord-payment-plan">Tỷ lệ thanh toán (Đợt 1-2-3)</label>
+            <input type="text" id="ord-payment-plan" class="form-input" placeholder="40-40-20">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ord-warranty-months">Bảo hành (tháng)</label>
+            <input type="number" id="ord-warranty-months" class="form-input" min="1" value="24">
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 8px 0;">
+          <strong style="font-size:13.5px;">Danh sách Hạng mục Bóc tách</strong>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.addItemRow()">+ Thêm hạng mục</button>
+        </div>
+        <div id="ord-items-container"></div>
+
+        <div class="form-row-2" style="margin-top:12px;align-items:center;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" for="ord-discount">Giảm giá (VNĐ)</label>
+            <input type="number" id="ord-discount" class="form-input" min="0" value="0" oninput="ORDERS_CLIENT.recalcTotal()">
+          </div>
+          <div style="text-align:right;background:#fffbeb;padding:12px;border-radius:10px;border:1px solid #fde68a;">
+            <div style="font-size:12px;color:#78350f;">TỔNG GIÁ TRỊ HỢP ĐỒNG</div>
+            <div id="ord-total-preview" style="font-size:20px;font-weight:800;color:#92400e;">0 ₫</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="ORDERS_CLIENT.closeCreateModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary" id="btn-submit-order">Lưu Báo Giá &amp; Tạo Đợt Thanh Toán</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var ORDERS_CLIENT = {
+    page: 1,
+    pageSize: 10,
+    draftItems: [],
+
+    onInit: function() {
+      var btnCreate = document.getElementById("btn-order-create");
+      if (btnCreate) btnCreate.style.display = APP.hasPermission("quotation.create") ? "" : "none";
+      var self = this;
+      CARPENTRY_HELPER.loadMeta(function() { self.loadOrders(1); });
+    },
+
+    onReload: function() { this.loadOrders(this.page); },
+
+    loadOrders: function(page) {
+      var self = this;
+      this.page = page || 1;
+      var kw = (document.getElementById("orders-search-input") || {}).value || "";
+      var st = (document.getElementById("orders-filter-status") || {}).value || "ALL";
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) {
+            APP.showToast((res && res.error) || "Lỗi tải danh sách đơn hàng.", "error");
+            return;
+          }
+          self.renderList(res.data.items || [], res.data.pagination);
+        })
+        .withFailureHandler(function(e) { APP.stopPageLoading(); APP.showToast(e.message || String(e), "error"); })
+        .apiGetFurnitureOrders(AUTH.getToken(), { keyword: kw, status: st }, this.page, this.pageSize);
+    },
+
+    renderList: function(items, pagination) {
+      var tbody = document.getElementById("orders-tbody");
+      var mob = document.getElementById("orders-mobile-list");
+      var empty = document.getElementById("orders-empty");
+      if (!items || items.length === 0) {
+        if (tbody) tbody.innerHTML = "";
+        if (mob) mob.innerHTML = "";
+        if (empty) empty.style.display = "";
+        APP.renderPagination("orders-pagination", null);
+        return;
+      }
+      if (empty) empty.style.display = "none";
+
+      var canApprove = APP.hasPermission("quotation.approve") || APP.hasPermission("order.approve");
+      if (tbody) {
+        tbody.innerHTML = items.map(function(o) {
+          var appBtn = (canApprove && (o.status === "QUOTED" || o.status === "DEPOSITED" || o.drawing_status !== "APPROVED"))
+            ? '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\')">Duyệt SX</button>'
+            : '';
+          var drawBtn = '<button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.openDrawings(\'' + o.id + '\')">Bản vẽ</button>';
+          var drwTag = o.drawing_status === "APPROVED"
+            ? '<span style="font-size:11px;color:#059669;font-weight:700;">✔ Bản vẽ duyệt</span>'
+            : '<span style="font-size:11px;color:#d97706;">⚠ Chờ duyệt BV</span>';
+          return '<tr>' +
+            '<td><code>' + UTILS.escapeHtml(o.order_code) + '</code><div style="font-size:11.5px;color:' + (o.is_late ? "#dc2626" : "var(--text-muted)") + ';">Giao: ' + CARPENTRY_HELPER.formatDateVi(o.due_date) + '</div></td>' +
+            '<td><strong>' + UTILS.escapeHtml(o.customer_name) + '</strong><div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(o.title) + '</div></td>' +
+            '<td><strong>' + UTILS.formatCurrency(o.total_amount) + '</strong></td>' +
+            '<td><div style="color:#059669;font-size:12.5px;">Thu: ' + UTILS.formatCurrency(o.paid_amount) + '</div><div style="color:#dc2626;font-size:12px;">Nợ: ' + UTILS.formatCurrency(o.debt_amount) + '</div></td>' +
+            '<td style="min-width:110px;"><div style="font-size:12px;font-weight:700;">' + (o.completion_pct || 0) + '%</div><div class="crp-progress-bar"><div class="crp-progress-fill" style="width:' + (o.completion_pct || 0) + '%;"></div></div></td>' +
+            '<td>' + CARPENTRY_HELPER.renderStatusBadge(o.status, o.status_label, o.status_emoji, o.status_color, o.status_bg) + '<div style="margin-top:3px;">' + drwTag + '</div></td>' +
+            '<td style="text-align:right;white-space:nowrap;">' + appBtn + ' ' + drawBtn + '</td>' +
+          '</tr>';
+        }).join("");
+      }
+      if (mob) {
+        mob.innerHTML = items.map(function(o) {
+          var appBtn = (canApprove && (o.status === "QUOTED" || o.status === "DEPOSITED" || o.drawing_status !== "APPROVED"))
+            ? '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\')">Duyệt SX</button>'
+            : '';
+          return '<div class="crp-mobile-card">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;"><code>' + UTILS.escapeHtml(o.order_code) + '</code>' + CARPENTRY_HELPER.renderStatusBadge(o.status, o.status_label, o.status_emoji, o.status_color, o.status_bg) + '</div>' +
+            '<div style="font-weight:700;margin-top:4px;">' + UTILS.escapeHtml(o.customer_name) + ' — ' + UTILS.escapeHtml(o.title) + '</div>' +
+            '<div style="font-size:12.5px;margin:4px 0;">HĐ: <strong>' + UTILS.formatCurrency(o.total_amount) + '</strong> • Nợ: <strong style="color:#dc2626;">' + UTILS.formatCurrency(o.debt_amount) + '</strong></div>' +
+            '<div class="crp-progress-bar"><div class="crp-progress-fill" style="width:' + (o.completion_pct || 0) + '%;"></div></div>' +
+            '<div style="display:flex;gap:8px;margin-top:8px;">' + appBtn + '<button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.openDrawings(\'' + o.id + '\')">Hồ sơ &amp; Bản vẽ</button></div>' +
+          '</div>';
+        }).join("");
+      }
+      var self = this;
+      APP.renderPagination("orders-pagination", pagination, function(p, ps) { self.pageSize = ps || 10; self.loadOrders(p); });
+    },
+
+    openCreateModal: function(prefillSurvey) {
+      var self = this;
+      CARPENTRY_HELPER.loadMeta(function(meta) {
+        var cSel = document.getElementById("ord-customer-id");
+        if (cSel && meta && meta.customers) {
+          cSel.innerHTML = '<option value="">-- Chọn chủ đầu tư --</option>' +
+            meta.customers.map(function(c) { return '<option value="' + c.id + '">' + UTILS.escapeHtml(c.full_name + " (" + c.phone + ")") + '</option>'; }).join("");
+          if (prefillSurvey && prefillSurvey.customer_id) cSel.value = prefillSurvey.customer_id;
+        }
+        document.getElementById("ord-survey-id").value = prefillSurvey ? prefillSurvey.id : "";
+        document.getElementById("ord-title").value = prefillSurvey ? ("Nội thất " + prefillSurvey.survey_area) : "";
+        document.getElementById("ord-payment-plan").value = (meta && meta.policy && meta.policy.paymentScheduleStr) || "40-40-20";
+        document.getElementById("ord-warranty-months").value = (meta && meta.policy && meta.policy.defaultWarrantyMonths) || 24;
+        document.getElementById("ord-discount").value = 0;
+
+        var dEl = document.getElementById("ord-due-date");
+        if (dEl) {
+          var dt = new Date(Date.now() + 18 * 86400000);
+          dEl.value = dt.toISOString().slice(0, 10);
+        }
+
+        self.draftItems = [{ category: "KITCHEN", item_name: "", spec_material: "MDF chống ẩm An Cường phủ Melamine", calc_mode: "MD", length_m: 3, height_or_width_m: 1, quantity: 1, unit_price: 3500000 }];
+        self.renderItemRows();
+        var modal = document.getElementById("modal-order-form");
+        if (modal) modal.classList.add("open");
+      }, true);
+    },
+
+    openCreateFromSurvey: function(srv) { this.openCreateModal(srv); },
+
+    closeCreateModal: function() {
+      var modal = document.getElementById("modal-order-form");
+      if (modal) modal.classList.remove("open");
+    },
+
+    addItemRow: function() {
+      this.draftItems.push({ category: "BEDROOM", item_name: "", spec_material: "MDF chống ẩm Melamine", calc_mode: "M2", length_m: 2, height_or_width_m: 2.4, quantity: 1, unit_price: 2800000 });
+      this.renderItemRows();
+    },
+
+    removeItemRow: function(idx) {
+      if (this.draftItems.length <= 1) return;
+      this.draftItems.splice(idx, 1);
+      this.renderItemRows();
+    },
+
+    updateField: function(idx, key, val) {
+      var it = this.draftItems[idx];
+      if (!it) return;
+      it[key] = (key === "length_m" || key === "height_or_width_m" || key === "quantity" || key === "unit_price") ? (Number(val) || 0) : val;
+      this.renderItemRows();
+    },
+
+    renderItemRows: function() {
+      var box = document.getElementById("ord-items-container");
+      if (!box) return;
+      box.innerHTML = this.draftItems.map(function(it, idx) {
+        var qtyCalc = it.calc_mode === "MD" ? (it.length_m * Math.max(1, it.quantity)) : (it.calc_mode === "M2" ? (it.length_m * it.height_or_width_m * Math.max(1, it.quantity)) : Math.max(1, it.quantity));
+        var lineAmt = Math.round(qtyCalc * (it.unit_price || 0));
+        return '<div style="border:1px solid #cbd5e1;border-radius:10px;padding:10px;margin-bottom:8px;background:#f8fafc;">' +
+          '<div class="form-row-3">' +
+            '<div><label class="form-label">Hạng mục</label><input type="text" class="form-input" value="' + UTILS.escapeHtml(it.item_name) + '" placeholder="VD: Tủ bếp dưới" onchange="ORDERS_CLIENT.updateField(' + idx + ',\'item_name\',this.value)"></div>' +
+            '<div><label class="form-label">Vật liệu</label><input type="text" class="form-input" value="' + UTILS.escapeHtml(it.spec_material) + '" onchange="ORDERS_CLIENT.updateField(' + idx + ',\'spec_material\',this.value)"></div>' +
+            '<div><label class="form-label">Cách tính</label><select class="form-select" onchange="ORDERS_CLIENT.updateField(' + idx + ',\'calc_mode\',this.value)">' +
+              '<option value="MD" ' + (it.calc_mode === "MD" ? "selected" : "") + '>Mét dài (md)</option>' +
+              '<option value="M2" ' + (it.calc_mode === "M2" ? "selected" : "") + '>Mét vuông (m2)</option>' +
+              '<option value="UNIT" ' + (it.calc_mode === "UNIT" ? "selected" : "") + '>Cái / Bộ</option>' +
+            '</select></div>' +
+          '</div>' +
+          '<div class="form-row-3" style="margin-top:8px;align-items:end;">' +
+            '<div style="display:flex;gap:6px;">' +
+              '<div style="flex:1;"><label class="form-label">Dài(m)</label><input type="number" step="0.01" class="form-input" value="' + it.length_m + '" onchange="ORDERS_CLIENT.updateField(' + idx + ',\'length_m\',this.value)"></div>' +
+              '<div style="flex:1;"><label class="form-label">Cao/Rộng</label><input type="number" step="0.01" class="form-input" value="' + it.height_or_width_m + '" onchange="ORDERS_CLIENT.updateField(' + idx + ',\'height_or_width_m\',this.value)"></div>' +
+              '<div style="flex:1;"><label class="form-label">SL</label><input type="number" min="1" class="form-input" value="' + it.quantity + '" onchange="ORDERS_CLIENT.updateField(' + idx + ',\'quantity\',this.value)"></div>' +
+            '</div>' +
+            '<div><label class="form-label">Đơn giá (đ)</label><input type="number" class="form-input" value="' + it.unit_price + '" onchange="ORDERS_CLIENT.updateField(' + idx + ',\'unit_price\',this.value)"></div>' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;"><strong>= ' + UTILS.formatCurrency(lineAmt) + '</strong><button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.removeItemRow(' + idx + ')">Xóa</button></div>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+      this.recalcTotal();
+    },
+
+    recalcTotal: function() {
+      var sub = this.draftItems.reduce(function(acc, it) {
+        var q = it.calc_mode === "MD" ? (it.length_m * Math.max(1, it.quantity)) : (it.calc_mode === "M2" ? (it.length_m * it.height_or_width_m * Math.max(1, it.quantity)) : Math.max(1, it.quantity));
+        return acc + Math.round(q * (it.unit_price || 0));
+      }, 0);
+      var disc = Math.max(0, Number((document.getElementById("ord-discount") || {}).value) || 0);
+      var el = document.getElementById("ord-total-preview");
+      if (el) el.textContent = UTILS.formatCurrency(Math.max(0, sub - disc));
+    },
+
+    submitOrder: function(e) {
+      e.preventDefault();
+      var self = this;
+      var payload = {
+        survey_id: (document.getElementById("ord-survey-id") || {}).value || "",
+        customer_id: (document.getElementById("ord-customer-id") || {}).value || "",
+        title: (document.getElementById("ord-title") || {}).value || "",
+        due_date: (document.getElementById("ord-due-date") || {}).value || "",
+        payment_plan_code: (document.getElementById("ord-payment-plan") || {}).value || "40-40-20",
+        warranty_months: Number((document.getElementById("ord-warranty-months") || {}).value) || 24,
+        discount_amount: Number((document.getElementById("ord-discount") || {}).value) || 0,
+        items: this.draftItems.filter(function(x) { return x.item_name && x.item_name.trim(); })
+      };
+      if (payload.items.length === 0) {
+        APP.showToast("Vui lòng nhập tên cho ít nhất 1 hạng mục.", "warning");
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã tạo báo giá & đơn hàng!", "success");
+            self.closeCreateModal();
+            self.loadOrders(1);
+          } else {
+            APP.showToast((res && res.error) || "Lỗi tạo đơn hàng.", "error");
+          }
+        })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast(err.message || String(err), "error"); })
+        .apiSaveQuotationOrder(AUTH.getToken(), payload);
+    },
+
+    approveOrder: function(orderId) {
+      var self = this;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã duyệt bản vẽ & ra lệnh sản xuất!", "success");
+            self.loadOrders(self.page);
+          } else {
+            APP.showToast((res && res.error) || "Không thể duyệt đơn.", "error");
+          }
+        })
+        .apiApproveQuotationAndStartOrder(AUTH.getToken(), { order_id: orderId, action: "START_PRODUCTION" });
+    },
+
+    openDrawings: function(orderId) {
+      APP.navigateTo("drawings");
+      setTimeout(function() {
+        if (window.DRAWINGS_CLIENT && typeof window.DRAWINGS_CLIENT.selectOrder === "function") {
+          window.DRAWINGS_CLIENT.selectOrder(orderId);
+        }
+      }, 150);
+    }
+  };
+  APP.registerModule("orders", ORDERS_CLIENT, "view-orders");
+</script>

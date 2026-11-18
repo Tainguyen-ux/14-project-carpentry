@@ -1,0 +1,268 @@
+<!-- =========================================================================
+     VIEW: KHẢO SÁT & ĐO ĐẠC CÔNG TRÌNH (`view-surveys`)
+     ========================================================================= -->
+<div id="view-surveys" class="content-view" style="display:none;">
+  <div class="toolbar-card">
+    <div class="toolbar-left">
+      <div class="search-box">
+        <input type="text" id="survey-search-input" class="form-input" placeholder="🔍 Tìm mã phiếu KS, tên khách, địa chỉ công trình..." onkeydown="if(event.key==='Enter') SURVEYS_CLIENT.loadSurveys(1)">
+      </div>
+      <select id="survey-filter-status" class="form-select" onchange="SURVEYS_CLIENT.loadSurveys(1)" style="width:auto;">
+        <option value="ALL">Tất cả trạng thái</option>
+        <option value="DRAFT">Chờ lên báo giá</option>
+        <option value="CONVERTED">Đã chuyển đơn hàng</option>
+      </select>
+    </div>
+    <div class="toolbar-right">
+      <button type="button" class="btn btn-secondary" onclick="SURVEYS_CLIENT.loadSurveys(1)">Tải lại</button>
+      <button type="button" id="btn-survey-create" class="btn btn-primary" onclick="SURVEYS_CLIENT.openCreateModal()">+ Phiếu khảo sát mới</button>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-container crp-desktop-table">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mã Phiếu KS</th>
+            <th>Chủ đầu tư &amp; Công trình</th>
+            <th>Khu vực đo</th>
+            <th>Kích thước ghi nhận</th>
+            <th>Lưu ý hiện trạng</th>
+            <th>Trạng thái</th>
+            <th style="text-align:right;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="surveys-tbody"></tbody>
+      </table>
+    </div>
+    <div id="surveys-mobile-list" class="crp-mobile-list"></div>
+    <div id="surveys-empty" class="table-empty" style="display:none;">
+      <h4>Chưa có phiếu khảo sát đo đạc nào</h4>
+      <p>Kỹ thuật viên bấm "+ Phiếu khảo sát mới" ngay tại công trình để ghi kích thước và chụp ảnh hiện trạng.</p>
+    </div>
+    <div id="surveys-pagination" class="pagination-wrapper" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- MODAL: Tạo Phiếu Khảo Sát Đo Đạc -->
+<div id="modal-survey-form" class="modal-backdrop">
+  <div class="modal-dialog" style="max-width:640px;">
+    <div class="modal-header">
+      <div class="modal-header-info">
+        <div class="modal-header-icon" style="background:#fffbeb;color:#b45309;">📐</div>
+        <div>
+          <h3 class="modal-title">Phiếu Khảo Sát Đo Đạc Công Trình</h3>
+          <div class="modal-subtitle">Ghi nhận kích thước thực tế, vướng mắc kỹ thuật &amp; ảnh mặt bằng lên Drive</div>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" onclick="SURVEYS_CLIENT.closeModal()">✕</button>
+    </div>
+    <form onsubmit="SURVEYS_CLIENT.submitSurvey(event)">
+      <div class="modal-body" style="padding:18px;">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label required" for="srv-customer-id">Chủ đầu tư / Công trình</label>
+            <select id="srv-customer-id" class="form-select" required></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="srv-date">Ngày đo đạc</label>
+            <input type="date" id="srv-date" class="form-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="srv-area">Khu vực đo đạc</label>
+          <input type="text" id="srv-area" class="form-input" placeholder="VD: Phòng Bếp &amp; Phòng Ngủ Master" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label required" for="srv-measurements">Kích thước ghi nhận</label>
+          <textarea id="srv-measurements" class="form-input" rows="3" placeholder="VD: Tủ bếp trên D3.2m x C0.75m; Tủ bếp dưới D3.2m x S0.6m; Tủ áo 2.4m x 2.6m" required></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="srv-constraints">Lưu ý hiện trạng / Kỹ thuật</label>
+          <textarea id="srv-constraints" class="form-input" rows="2" placeholder="VD: Vướng hộp kỹ thuật góc trái, chừa ổ cắm bếp từ, cửa đi cấn nẹp..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="srv-photo-file">📷 Chụp ảnh mặt bằng lúc đo đạc (Lưu thẳng Drive)</label>
+          <input type="file" id="srv-photo-file" class="form-input" accept="image/*" capture="environment">
+          <div id="srv-photo-status" style="font-size:12px;color:#059669;margin-top:4px;"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="SURVEYS_CLIENT.closeModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary" id="btn-submit-survey">Lưu phiếu khảo sát</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var SURVEYS_CLIENT = {
+    page: 1,
+    pageSize: 10,
+    photoPayload: null,
+    itemsCache: [],
+
+    onInit: function() {
+      var self = this;
+      var btnCreate = document.getElementById("btn-survey-create");
+      if (btnCreate) btnCreate.style.display = APP.hasPermission("survey.create") ? "" : "none";
+
+      var fileInp = document.getElementById("srv-photo-file");
+      if (fileInp && !fileInp._bound) {
+        fileInp._bound = true;
+        fileInp.addEventListener("change", function(e) {
+          var f = e.target && e.target.files && e.target.files[0];
+          if (!f) { self.photoPayload = null; return; }
+          CARPENTRY_HELPER.readFileAsBase64(f, function(res) {
+            self.photoPayload = res;
+            var stEl = document.getElementById("srv-photo-status");
+            if (stEl) stEl.textContent = res ? ("Đã chọn ảnh: " + res.file_name) : "";
+          });
+        });
+      }
+      CARPENTRY_HELPER.loadMeta(function() { self.loadSurveys(1); });
+    },
+
+    onReload: function() { this.loadSurveys(this.page); },
+
+    loadSurveys: function(page) {
+      var self = this;
+      this.page = page || 1;
+      var kw = (document.getElementById("survey-search-input") || {}).value || "";
+      var st = (document.getElementById("survey-filter-status") || {}).value || "ALL";
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (!res || !res.success || !res.data) {
+            APP.showToast((res && res.error) || "Lỗi tải danh sách khảo sát.", "error");
+            return;
+          }
+          self.itemsCache = res.data.items || [];
+          self.renderList(self.itemsCache, res.data.pagination);
+        })
+        .withFailureHandler(function(e) { APP.stopPageLoading(); APP.showToast(e.message || String(e), "error"); })
+        .apiGetSurveys(AUTH.getToken(), { keyword: kw, status: st }, this.page, this.pageSize);
+    },
+
+    renderList: function(items, pagination) {
+      var tbody = document.getElementById("surveys-tbody");
+      var mob = document.getElementById("surveys-mobile-list");
+      var empty = document.getElementById("surveys-empty");
+      if (!items || items.length === 0) {
+        if (tbody) tbody.innerHTML = "";
+        if (mob) mob.innerHTML = "";
+        if (empty) empty.style.display = "";
+        APP.renderPagination("surveys-pagination", null);
+        return;
+      }
+      if (empty) empty.style.display = "none";
+
+      var canQuote = APP.hasPermission("quotation.create");
+      if (tbody) {
+        tbody.innerHTML = items.map(function(s) {
+          var badge = s.status === "CONVERTED"
+            ? '<span class="crp-badge" style="background:#ecfdf5;color:#059669;">✅ ' + UTILS.escapeHtml(s.linked_order_code || "Đã lên đơn") + '</span>'
+            : '<span class="crp-badge" style="background:#fffbeb;color:#d97706;">📐 Chờ báo giá</span>';
+          var actBtn = (canQuote && s.status !== "CONVERTED")
+            ? '<button type="button" class="btn btn-primary btn-sm" onclick="SURVEYS_CLIENT.convertToQuote(\'' + s.id + '\')">Lập báo giá</button>'
+            : '';
+          return '<tr>' +
+            '<td><code>' + UTILS.escapeHtml(s.survey_code) + '</code><div style="font-size:11.5px;color:var(--text-muted);">' + CARPENTRY_HELPER.formatDateVi(s.survey_date) + '</div></td>' +
+            '<td><strong>' + UTILS.escapeHtml(s.customer_name) + '</strong><div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(s.customer_phone) + ' • ' + UTILS.escapeHtml(s.site_address || "") + '</div></td>' +
+            '<td><strong>' + UTILS.escapeHtml(s.survey_area) + '</strong></td>' +
+            '<td style="font-size:12.5px;max-width:260px;">' + UTILS.escapeHtml(s.measurements_summary) + '</td>' +
+            '<td style="font-size:12px;color:#b45309;max-width:200px;">' + UTILS.escapeHtml(s.site_constraints || "-") + '</td>' +
+            '<td>' + badge + '</td>' +
+            '<td style="text-align:right;">' + actBtn + '</td>' +
+          '</tr>';
+        }).join("");
+      }
+      if (mob) {
+        mob.innerHTML = items.map(function(s) {
+          var actBtn = (canQuote && s.status !== "CONVERTED")
+            ? '<button type="button" class="btn btn-primary btn-sm" style="margin-top:8px;width:100%;" onclick="SURVEYS_CLIENT.convertToQuote(\'' + s.id + '\')">👉 Chuyển thành Báo giá / Đơn</button>'
+            : '';
+          return '<div class="crp-mobile-card">' +
+            '<div style="display:flex;justify-content:space-between;"><code>' + UTILS.escapeHtml(s.survey_code) + '</code><span>' + CARPENTRY_HELPER.formatDateVi(s.survey_date) + '</span></div>' +
+            '<div style="font-weight:700;margin-top:4px;">' + UTILS.escapeHtml(s.customer_name) + ' — ' + UTILS.escapeHtml(s.survey_area) + '</div>' +
+            '<div style="font-size:12.5px;color:#334155;margin:4px 0;">📏 ' + UTILS.escapeHtml(s.measurements_summary) + '</div>' +
+            (s.site_constraints ? '<div style="font-size:12px;color:#b45309;">⚠ ' + UTILS.escapeHtml(s.site_constraints) + '</div>' : '') +
+            actBtn +
+          '</div>';
+        }).join("");
+      }
+      var self = this;
+      APP.renderPagination("surveys-pagination", pagination, function(p, ps) { self.pageSize = ps || 10; self.loadSurveys(p); });
+    },
+
+    openCreateModal: function() {
+      var self = this;
+      this.photoPayload = null;
+      var stEl = document.getElementById("srv-photo-status");
+      if (stEl) stEl.textContent = "";
+      var fInp = document.getElementById("srv-photo-file");
+      if (fInp) fInp.value = "";
+
+      CARPENTRY_HELPER.loadMeta(function(meta) {
+        var sel = document.getElementById("srv-customer-id");
+        if (sel && meta && meta.customers) {
+          sel.innerHTML = '<option value="">-- Chọn chủ đầu tư / công trình --</option>' +
+            meta.customers.map(function(c) {
+              return '<option value="' + c.id + '">' + UTILS.escapeHtml(c.full_name + " (" + c.phone + ") - " + (c.site_address || c.customer_code)) + '</option>';
+            }).join("");
+        }
+        var dInp = document.getElementById("srv-date");
+        if (dInp && meta) dInp.value = meta.today || "";
+        var m = document.getElementById("modal-survey-form");
+        if (m) m.classList.add("open");
+      }, true);
+    },
+
+    closeModal: function() {
+      var m = document.getElementById("modal-survey-form");
+      if (m) m.classList.remove("open");
+    },
+
+    submitSurvey: function(e) {
+      e.preventDefault();
+      var self = this;
+      var payload = {
+        customer_id: (document.getElementById("srv-customer-id") || {}).value || "",
+        survey_date: (document.getElementById("srv-date") || {}).value || "",
+        survey_area: (document.getElementById("srv-area") || {}).value || "",
+        measurements_summary: (document.getElementById("srv-measurements") || {}).value || "",
+        site_constraints: (document.getElementById("srv-constraints") || {}).value || ""
+      };
+      if (this.photoPayload) {
+        payload.photo_base64 = this.photoPayload.base64;
+        payload.photo_file_name = this.photoPayload.file_name;
+        payload.photo_mime_type = this.photoPayload.mime_type;
+      }
+      google.script.run
+        .withSuccessHandler(function(res) {
+          APP.stopPageLoading();
+          if (res && res.success) {
+            APP.showToast(res.message || "Đã lưu phiếu khảo sát!", "success");
+            self.closeModal();
+            self.loadSurveys(1);
+          } else {
+            APP.showToast((res && res.error) || "Không thể lưu khảo sát.", "error");
+          }
+        })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast(err.message || String(err), "error"); })
+        .apiSaveSurvey(AUTH.getToken(), payload);
+    },
+
+    convertToQuote: function(surveyId) {
+      var srv = this.itemsCache.find(function(x) { return x.id === surveyId; });
+      APP.navigateTo("orders");
+      setTimeout(function() {
+        if (window.ORDERS_CLIENT && typeof window.ORDERS_CLIENT.openCreateFromSurvey === "function") {
+          window.ORDERS_CLIENT.openCreateFromSurvey(srv);
+        }
+      }, 150);
+    }
+  };
+  APP.registerModule("surveys", SURVEYS_CLIENT, "view-surveys");
+</script>

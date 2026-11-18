@@ -1,35 +1,26 @@
 /**
- * app-template/tests/run_template_integration.js
- * Bộ kiểm thử tích hợp đầu-cuối (End-to-End Integration Test) giữa `app-template` và `app-core` Library.
- *
- * Kiểm chứng toàn diện:
- * 1. Biên giới 2 VM độc lập: `app-template` chỉ nhận đối tượng `Core` đóng băng (`{ VERSION, init }`) từ `app-core`.
- * 2. `doGet({})` nạp chính xác các file HTML trong thư mục con (`ui/*`, `pages/*`) và tự khởi tạo 12 bảng (0 dòng rác trong `SAMPLE_ITEMS`).
- * 3. Toàn bộ 22 hàm uỷ quyền mỏng trong `RpcGateway.gs` hoạt động thông suốt.
- * 4. Module mẫu `SampleService.gs`: sinh mã tự động `SMP0001..SMP0012`, phân trang bắt buộc (10 + 2), và chặn RBAC `sample.delete` với nhân viên `Staff`.
- * 5. Kiểm tra cú pháp JS (`new vm.Script`) cho mọi thẻ `<script>` và đối chiếu 100% `document.getElementById(...)` tĩnh với DOM thực tế.
- * 6. Chạy thử script khởi tạo dự án mới `scripts/new-project.ps1` ra thư mục tạm và kiểm tra kết quả đóng dấu cấu hình.
+ * 14-project-carpentry/tests/run_template_integration.js
+ * Bộ kiểm thử tích hợp đầu-cuối (End-to-End Integration Test) cho Hệ Thống Quản Lý Xưởng Mộc & Nội Thất May Đo (MVP)
+ * trên nền BaseAppScript Core Library (2 VM độc lập).
  */
 
 const assert = require("assert");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const crypto = require("crypto");
-const { execFileSync } = require("child_process");
 
-const templateRoot = path.resolve(__dirname, "..");
-const templateSrcDir = path.join(templateRoot, "src");
+const projectRoot = path.resolve(__dirname, "..");
+const projectSrcDir = path.join(projectRoot, "src");
 const coreSrcCandidates = [
   process.env.APP_CORE_SRC_DIR ? path.resolve(process.env.APP_CORE_SRC_DIR) : "",
-  path.resolve(templateRoot, "..", "app-core", "src"),
-  path.resolve(templateRoot, "..", "BaseAppScript", "app-core", "src")
+  path.resolve(projectRoot, "..", "app-core", "src"),
+  path.resolve(projectRoot, "..", "BaseAppScript", "app-core", "src")
 ].filter(Boolean);
 const coreSrcDir = coreSrcCandidates.find((p) => fs.existsSync(p)) || coreSrcCandidates[0];
 
 // =========================================================================
-// 1. MÔI TRƯỜNG GIẢ LẬP GOOGLE APPS SCRIPT CHO CẢ 2 VM (CORE LIBRARY & PROJECT)
+// 1. MÔI TRƯỜNG GIẢ LẬP GOOGLE APPS SCRIPT CHO CẢ 2 VM (SHEETS + DRIVE)
 // =========================================================================
 
 class MockRange {
@@ -168,10 +159,54 @@ class MockSpreadsheet {
   }
 }
 
+class MockDriveFolder {
+  constructor(name) {
+    this.id = "FLD_" + crypto.randomUUID().slice(0, 8);
+    this.name = name;
+    this.folders = [];
+    this.files = [];
+  }
+  getId() { return this.id; }
+  getName() { return this.name; }
+  getFoldersByName(name) {
+    const matches = this.folders.filter((f) => f.name === name);
+    let idx = 0;
+    return { hasNext: () => idx < matches.length, next: () => matches[idx++] };
+  }
+  createFolder(name) {
+    const child = new MockDriveFolder(name);
+    this.folders.push(child);
+    return child;
+  }
+  createFile(blob) {
+    const fid = "DRV_CRP_" + crypto.randomUUID().slice(0, 8);
+    const f = {
+      id: fid,
+      name: blob && blob.getName ? blob.getName() : "file.jpg",
+      mimeType: blob && blob.getContentType ? blob.getContentType() : "image/jpeg",
+      getId: () => fid,
+      getName: () => f.name,
+      getUrl: () => "https://drive.google.com/uc?export=view&id=" + fid,
+      setSharing: () => f
+    };
+    this.files.push(f);
+    return f;
+  }
+}
+
+const mockDriveRoot = new MockDriveFolder("ROOT");
+const MockDriveApp = {
+  Access: { ANYONE_WITH_LINK: "ANYONE_WITH_LINK" },
+  Permission: { VIEW: "VIEW" },
+  getFoldersByName: (name) => mockDriveRoot.getFoldersByName(name),
+  createFolder: (name) => mockDriveRoot.createFolder(name)
+};
+
 function makeScopedServices() {
   const props = new Map();
   const cache = new Map();
   return {
+    _propsMap: props,
     properties: {
       getProperty: (k) => (props.has(k) ? props.get(k) : null),
       setProperty: (k, v) => props.set(k, String(v)),
@@ -200,7 +235,7 @@ function makeUtilities() {
       return Array.from(buf).map((b) => (b > 127 ? b - 256 : b));
     },
     getUuid: () => crypto.randomUUID(),
-    formatDate(date, tz, fmt) {
+    formatDate(date, _tz, fmt) {
       const d = new Date(date);
       const pad = (n) => String(n).padStart(2, "0");
       const yyyy = d.getFullYear();
@@ -210,21 +245,26 @@ function makeUtilities() {
       const mm = pad(d.getMinutes());
       const ss = pad(d.getSeconds());
       if (fmt === "yyyy-MM-dd") return `${yyyy}-${MM}-${dd}`;
+      if (fmt === "yyyyMMdd") return `${yyyy}${MM}${dd}`;
       return `${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`;
     },
     base64EncodeWebSafe: (str) => Buffer.from(String(str), "utf8").toString("base64url"),
     base64DecodeWebSafe: (b64) => Buffer.from(String(b64), "base64url"),
-    newBlob: (buf) => ({
+    base64Decode: (b64) => Array.from(Buffer.from(String(b64), "base64")),
+    newBlob: (buf, mimeType, name) => ({
+      getBytes: () => buf,
+      getContentType: () => mimeType || "application/octet-stream",
+      getName: () => name || "file.bin",
       getDataAsString: () => Buffer.from(buf).toString("utf8")
     })
   };
 }
 
-const projectSpreadsheet = new MockSpreadsheet("SS_STARTER_001", "Starter App DB");
+const projectSpreadsheet = new MockSpreadsheet("SS_CARPENTRY_001", "Carpentry MVP DB");
 const coreOwnServices = makeScopedServices();
 const projectOwnServices = makeScopedServices();
 
-// --- VM #1: Nạp Core Library ---
+// --- VM #1: Core Library ---
 const coreVm = {
   console, Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error, parseInt, parseFloat, isNaN,
   Logger: { log() {} },
@@ -259,35 +299,33 @@ for (const f of coreFiles) {
   vm.runInContext(fs.readFileSync(path.join(coreSrcDir, f), "utf8"), coreVm, { filename: "core/" + f });
 }
 
-// Chỉ xuất đúng Public API như Google Apps Script Library
 const ExportedCoreLibrary = Object.freeze({
   VERSION: coreVm.VERSION,
   init: coreVm.init
 });
 
-// --- VM #2: Nạp Project Template (`app-template/src`) ---
-// Mô phỏng chính xác cách `clasp push` đặt tên file HTML theo đường dẫn tương đối trong `src/` (ví dụ: "ui/Index", "pages/Page_Sample")
+// --- VM #2: Project (`14-project-carpentry/src`) ---
 function resolveClaspHtmlFile(gasName) {
   const normalized = String(gasName).replace(/\\/g, "/");
-  // Chỉ chấp nhận khi đường dẫn thực sự tồn tại đúng trong src/ (bắt buộc Code.gs phải thử "ui/" + filename hoặc "pages/" + filename)
-  const fullPath = path.join(templateSrcDir, normalized + ".html");
+  const fullPath = path.join(projectSrcDir, normalized + ".html");
   if (!fs.existsSync(fullPath)) {
     throw new Error("No HTML file with name: " + gasName);
   }
   return fs.readFileSync(fullPath, "utf8");
 }
 
-const templateVm = {
+const projectVm = {
   console, Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error, parseInt, parseFloat, isNaN,
   Core: ExportedCoreLibrary,
   Logger: { log() {} },
   ScriptApp: {
-    getScriptId: () => "1StarterProjectScriptIdMock001"
+    getScriptId: () => "1CarpentryProjectScriptIdMock014"
   },
   SpreadsheetApp: {
     getActiveSpreadsheet: () => projectSpreadsheet,
     openById: (id) => (id === projectSpreadsheet.getId() ? projectSpreadsheet : null)
   },
+  DriveApp: MockDriveApp,
   PropertiesService: { getScriptProperties: () => projectOwnServices.properties },
   CacheService: { getScriptCache: () => projectOwnServices.cache },
   LockService: { getScriptLock: () => projectOwnServices.lock },
@@ -312,7 +350,7 @@ const templateVm = {
         evaluate() {
           const rendered = raw
             .replace(/<\?=\s*([a-zA-Z0-9_]+)\s*\?>/g, (_, varName) => String(tpl[varName] || ""))
-            .replace(/<\?!=\s*include\(['"]([^'"]+)['"]\);?\s*\?>/g, (_, incName) => templateVm.include(incName));
+            .replace(/<\?!=\s*include\(['"]([^'"]+)['"]\);?\s*\?>/g, (_, incName) => projectVm.include(incName));
           return {
             getContent: () => rendered,
             setTitle() { return this; },
@@ -325,168 +363,462 @@ const templateVm = {
     }
   }
 };
-vm.createContext(templateVm);
+vm.createContext(projectVm);
 
-console.log("=== [APP-TEMPLATE INTEGRATION TEST SUITE] ===");
+console.log("=== [14-PROJECT-CARPENTRY E2E INTEGRATION TEST SUITE] ===");
 
-const templateGsFiles = [
+const projectGsFiles = [
   "config/ProjectConfig.gs",
   "Code.gs",
   "RpcGateway.gs",
-  "business/SampleService.gs"
+  "business/CarpentryCoreHelper.gs",
+  "business/CarpentryCustomerSurveyCatalogService.gs",
+  "business/CarpentryOrderProductionMaterialService.gs",
+  "business/CarpentryPaymentInstallWarrantyReportService.gs"
 ];
-for (const f of templateGsFiles) {
-  vm.runInContext(fs.readFileSync(path.join(templateSrcDir, f), "utf8"), templateVm, { filename: "template/" + f });
+for (const f of projectGsFiles) {
+  vm.runInContext(fs.readFileSync(path.join(projectSrcDir, f), "utf8"), projectVm, { filename: "carpentry/" + f });
 }
-console.log(`  [PASS] Loaded all ${templateGsFiles.length} .gs files in app-template/src linked to Core v${ExportedCoreLibrary.VERSION}.`);
+console.log(`  [PASS] Loaded all ${projectGsFiles.length} .gs files linked to Core v${ExportedCoreLibrary.VERSION}.`);
 
 // =========================================================================
-// TEST 1: KIỂM TRA `doGet({})`, SUBFOLDER INCLUDE (`ui/`, `pages/`) & 12 BẢNG AUTO-INIT
+// TEST 1: `doGet({})`, 11 BẢNG CORE + 12 BẢNG XƯỞNG MỘC AUTO-INIT (0 DÒNG RÁC)
 // =========================================================================
-const renderedHtml = templateVm.doGet({}).getContent();
+const renderedHtml = projectVm.doGet({}).getContent();
 {
   assert.ok(!renderedHtml.includes("Lỗi khởi động ứng dụng"), "doGet() must render cleanly without errors");
-  assert.ok(renderedHtml.includes('id="app-view"'), "Rendered HTML must include #app-view");
-  assert.ok(renderedHtml.includes('id="sidebar-dynamic-groups"'), "Rendered HTML must include #sidebar-dynamic-groups");
-  assert.ok(renderedHtml.includes('id="view-menus"'), "Rendered HTML must include #view-menus");
-  assert.ok(renderedHtml.includes('id="view-sample"'), "Rendered HTML must include #view-sample from pages/Page_Sample.html");
-  assert.ok(renderedHtml.includes("var MENUS_CLIENT"), "Rendered HTML must include Js_Menus.html");
-  assert.ok(renderedHtml.includes("var SAMPLE_CLIENT"), "Rendered HTML must include Page_Sample.html script");
-
-  // Kiểm tra đủ 11 bảng Core + 1 bảng SAMPLE_ITEMS (tổng 12 bảng dữ liệu + Sheet1 mặc định)
-  const sampleSheet = projectSpreadsheet.getSheetByName("SAMPLE_ITEMS");
-  assert.ok(sampleSheet, "SAMPLE_ITEMS sheet must be auto-initialized");
-  assert.strictEqual(sampleSheet.getLastRow(), 1, "SAMPLE_ITEMS must be Readily Production (header row only, 0 mock rows)");
-  console.log("  [PASS] doGet() rendered full UI/Pages HTML and auto-initialized 11 Core + 1 Business sheets (0 mock rows).");
-}
-
-// =========================================================================
-// TEST 2: KIỂM TRA TOÀN BỘ CỔNG UỶ QUYỀN `RpcGateway.gs`
-// =========================================================================
-const loginRes = templateVm.apiLogin({ username: "admin", password: "admin123" });
-assert.strictEqual(loginRes.success, true, loginRes.message);
-const adminToken = loginRes.data.token;
-
-{
-  // Kiểm tra phiên chứa menu động `sample` và tham số cấu hình công khai `DEFAULT_PAGE_SIZE`
-  const sessRes = templateVm.apiCheckSession(adminToken);
-  assert.strictEqual(sessRes.success, true);
-  assert.ok(sessRes.data.menus.some((m) => m.code === "sample"), "Session menus must include business menu 'sample'");
-  assert.strictEqual(sessRes.data.public_configs.DEFAULT_PAGE_SIZE, "10");
-
-  // Danh sách Users, Roles, Menus, Settings, Audit qua RpcGateway
-  assert.strictEqual(templateVm.apiGetUsersList(adminToken, {}, 1, 10).success, true);
-  assert.strictEqual(templateVm.apiGetRolesList(adminToken, {}, 1, 10).success, true);
-  assert.strictEqual(templateVm.apiGetRolePermissions(adminToken, "ROLE_STAFF").success, true);
-  assert.strictEqual(templateVm.apiGetMenusList(adminToken, {}, 1, 10).success, true);
-  assert.strictEqual(templateVm.apiGetAppSettings(adminToken).success, true);
-  assert.strictEqual(templateVm.apiClearSystemCache(adminToken).success, true);
-  assert.strictEqual(templateVm.apiGetAuditLogs(adminToken, {}, 1, 10).success, true);
-
-  console.log("  [PASS] RpcGateway.gs delegated Auth, Users, Roles, Permissions, Menus, Config, Cache & Audit cleanly.");
-}
-
-// =========================================================================
-// TEST 3: KIỂM TRA MODULE MẪU `SampleService.gs` (PHÂN TRANG + RBAC 2 TẦNG)
-// =========================================================================
-{
-  const createStaff = templateVm.apiCreateUser(adminToken, {
-    username: "staff_sample",
-    password: "password123",
-    full_name: "Nhân viên Nghiệp vụ Mẫu",
-    phone: "0912345678",
-    email: "staff@starter.local",
-    role_ids: ["ROLE_STAFF"]
+  [
+    "view-dashboard", "view-surveys", "view-orders", "view-drawings",
+    "view-production", "view-materials", "view-payments",
+    "view-install-warranty", "view-customers", "view-reports-cash",
+    "mobile-bottom-nav", "modal-crp-qr-scan"
+  ].forEach((viewId) => {
+    assert.ok(renderedHtml.includes(`id="${viewId}"`), `Rendered HTML must include #${viewId}`);
   });
-  assert.strictEqual(createStaff.success, true, createStaff.message);
-  const staffUserId = createStaff.data.id;
 
-  // Kiểm tra RPC phân quyền Menu cá nhân qua RpcGateway
-  const userMenuMatrix = templateVm.apiGetUserMenus(adminToken, staffUserId);
-  assert.strictEqual(userMenuMatrix.success, true);
-  const saveUserMenus = templateVm.apiSaveUserMenus(adminToken, staffUserId, [
-    { menu_id: "MNU_AUDIT", effect: "GRANT" }
-  ]);
-  assert.strictEqual(saveUserMenus.success, true);
+  const businessSheets = [
+    "CUSTOMERS", "CARPENTRY_SURVEYS", "MATERIAL_CATALOG",
+    "FURNITURE_ORDERS", "ORDER_ITEMS", "PRODUCTION_PROGRESS",
+    "ORDER_PAYMENTS", "ORDER_MATERIALS", "ORDER_FILES_PHOTOS",
+    "PACKAGE_QR", "WARRANTY_TICKETS", "CASH_TRANSACTIONS"
+  ];
+  const coreSheets = [
+    "USERS", "ROLES", "USER_ROLES", "PERMISSIONS", "ROLE_PERMISSIONS",
+    "MENUS", "ROLE_MENUS", "USER_MENUS", "CONFIG", "SESSIONS", "AUDIT_LOG"
+  ];
+  [...coreSheets, ...businessSheets].forEach((s) => {
+    assert.ok(projectSpreadsheet.getSheetByName(s), `Expected sheet '${s}' auto-created`);
+  });
 
-  const staffLogin = templateVm.apiLogin({ username: "staff_sample", password: "password123" });
-  assert.strictEqual(staffLogin.success, true);
-  const staffToken = staffLogin.data.token;
-  assert.ok(staffLogin.data.menu_permissions.includes("menu.audit"), "Staff received granted menu.audit via RpcGateway");
+  // Readily Production: 0 mock/seed rows in all 12 business sheets
+  businessSheets.forEach((s) => {
+    assert.strictEqual(projectSpreadsheet.getSheetByName(s).getLastRow(), 1, `Sheet ${s} must contain only header row (0 seed rows)`);
+  });
 
-  // Nhân viên tạo 12 bản ghi nghiệp vụ mẫu -> tự sinh mã SMP0001 .. SMP0012
-  let firstItemId = "";
-  for (let i = 1; i <= 12; i++) {
-    const saveRes = templateVm.apiSaveSampleItem(staffToken, {
-      item_name: `Hạng mục mẫu số ${i}`,
-      category: i % 2 === 0 ? "Nhóm A" : "Nhóm B",
-      status: "ACTIVE",
-      notes: `Ghi chú kiểm thử ${i}`
+  assert.strictEqual(coreOwnServices._propsMap.size, 0, "Core Library VM must store zero project properties");
+  console.log("  [PASS] TEST 1: doGet() + 11 Core + 12 Carpentry Business sheets auto-initialized (0 mock rows) & VM isolated.");
+}
+
+// =========================================================================
+// TEST 2: ADMIN LOGIN, 9 MENU ĐỘNG & 10 THAM SỐ ĐỘNG CONFIG
+// =========================================================================
+const adminLogin = projectVm.apiLogin({ username: "admin", password: "admin123" });
+assert.strictEqual(adminLogin.success, true, adminLogin.message);
+const adminToken = adminLogin.data.token;
+assert.strictEqual(coreOwnServices._propsMap.size, 0, "Core Library VM must remain empty after login");
+assert.ok(projectOwnServices._propsMap.size > 0, "Project PropertiesService must hold isolated project properties");
+
+const sessRes = projectVm.apiCheckSession(adminToken);
+assert.strictEqual(sessRes.success, true, sessRes.message);
+assert.strictEqual(sessRes.data.is_admin, true);
+assert.strictEqual(sessRes.data.menus.filter((m) => String(m.id).startsWith("MNU_CRP_")).length, 9, "Expected 9 dynamic Carpentry menus");
+
+const settingsRes = projectVm.apiGetAppSettings(adminToken);
+assert.strictEqual(settingsRes.success, true);
+const cfgKeys = new Set(settingsRes.data.list.map((d) => d.key));
+[
+  "DEFAULT_PAGE_SIZE", "UPCOMING_DELIVERY_DAYS", "URGENT_DELAY_ALERT_DAYS",
+  "PAYMENT_INSTALLMENT_SCHEDULE", "DEFAULT_WARRANTY_MONTHS",
+  "REQUIRE_STAGE2_PAY_BEFORE_SHIP", "PRODUCTION_STAGES_JSON",
+  "LOW_STOCK_THRESHOLD_DEFAULT", "OPENING_CASH_BALANCE", "CARPENTRY_DRIVE_FOLDER_NAME"
+].forEach((k) => assert.ok(cfgKeys.has(k), `CONFIG must contain '${k}'`));
+
+console.log("  [PASS] TEST 2: Admin USR001 authenticated, 9 menus & 10 dynamic Carpentry CONFIG keys verified.");
+
+// =========================================================================
+// TEST 3: MA TRẬN PHÂN QUYỀN 4 VAI TRÒ XƯỞNG MỘC (KỸ THUẬT / XƯỞNG / LẮP ĐẶT / KẾ TOÁN)
+// =========================================================================
+let techToken, foremanToken, installerToken, accountantToken;
+{
+  const permsResp = projectVm.apiGetRolePermissions(adminToken, "ROLE_STAFF");
+  assert.strictEqual(permsResp.success, true);
+  const permCodeToId = {};
+  (permsResp.data.module_groups || []).forEach((grp) => {
+    (grp.permissions || []).forEach((p) => { permCodeToId[p.code] = p.id; });
+  });
+
+  function createRoleAndUser(code, roleName, permCodes, username, fullName) {
+    const cr = projectVm.apiCreateRole(adminToken, { code, name: roleName, description: roleName });
+    assert.strictEqual(cr.success, true, cr.message);
+    const permIds = permCodes.map((c) => permCodeToId[c]).filter(Boolean);
+    assert.strictEqual(permIds.length, permCodes.length, `All perm codes for ${code} must resolve`);
+    const sp = projectVm.apiSaveRolePermissions(adminToken, cr.data.id, permIds);
+    assert.strictEqual(sp.success, true, sp.message);
+
+    const cu = projectVm.apiCreateUser(adminToken, {
+      username, password: "Crp@2026", full_name: fullName, email: `${username}@carpentry.vn`,
+      role_ids: [cr.data.id], status: "ACTIVE"
     });
-    assert.strictEqual(saveRes.success, true, saveRes.message);
-    if (i === 1) {
-      assert.strictEqual(saveRes.data.item_code, "SMP0001");
-      firstItemId = saveRes.data.id;
-    }
-    if (i === 12) {
-      assert.strictEqual(saveRes.data.item_code, "SMP0012");
-    }
+    assert.strictEqual(cu.success, true, cu.message);
+    const lg = projectVm.apiLogin({ username, password: "Crp@2026" });
+    assert.strictEqual(lg.success, true, lg.message);
+    return lg.data.token;
   }
 
-  // Kiểm tra phân trang bắt buộc (Trang 1: 10 dòng, Trang 2: 2 dòng)
-  const page1 = templateVm.apiGetSampleItems(staffToken, {}, 1, 10);
-  assert.strictEqual(page1.success, true);
-  assert.strictEqual(page1.data.items.length, 10);
-  assert.strictEqual(page1.data.pagination.total, 12);
-  assert.strictEqual(page1.data.pagination.totalPages, 2);
-  assert.strictEqual(page1.data.pagination.hasNext, true);
+  techToken = createRoleAndUser(
+    "TECH_DESIGN", "Kỹ thuật viên & Thiết kế",
+    ["menu.surveys", "menu.orders", "menu.drawings", "menu.materials", "menu.customers", "customer.view", "customer.manage", "survey.create", "order.view", "quotation.create", "drawing.view", "drawing.upload", "photo.upload", "material.estimate"],
+    "kythuat1", "Lê Văn Sơn (Thiết kế)"
+  );
 
-  const page2 = templateVm.apiGetSampleItems(staffToken, {}, 2, 10);
-  assert.strictEqual(page2.success, true);
-  assert.strictEqual(page2.data.items.length, 2);
-  assert.strictEqual(page2.data.pagination.hasPrev, true);
+  foremanToken = createRoleAndUser(
+    "FOREMAN", "Tổ trưởng Xưởng & Thợ SX",
+    ["menu.production", "menu.drawings", "menu.materials", "order.view", "drawing.view", "production.stage_update", "photo.upload", "package.qr_print", "material.issue"],
+    "toxuong1", "Nguyễn Hùng (Tổ trưởng xưởng)"
+  );
 
-  // Nhân viên được phép cập nhật (`sample.update`) nhưng BỊ CHẶN xóa (`sample.delete`)
-  const updateRes = templateVm.apiSaveSampleItem(staffToken, {
-    id: firstItemId,
-    item_name: "Hạng mục mẫu số 1 (Đã cập nhật)",
-    category: "Nhóm VIP",
-    status: "ACTIVE"
-  });
-  assert.strictEqual(updateRes.success, true, updateRes.message);
+  installerToken = createRoleAndUser(
+    "INSTALLER", "Đội trưởng Lắp đặt & Bảo hành",
+    ["menu.install_warranty", "menu.drawings", "order.view", "drawing.view", "delivery.update", "acceptance.sign", "photo.upload", "warranty.manage"],
+    "lapdat1", "Phạm Trung Hiếu (Lắp đặt)"
+  );
 
-  const forbiddenDelete = templateVm.apiDeleteSampleItem(staffToken, firstItemId);
-  assert.strictEqual(forbiddenDelete.success, false, "Staff without sample.delete MUST be blocked on server!");
+  accountantToken = createRoleAndUser(
+    "ACCOUNTANT", "Kế toán & Thu ngân",
+    ["menu.payments", "menu.reports_cash", "order.view", "order.view_all", "payment.create", "debt.view", "material.expense_create", "cash.view", "report.view"],
+    "ketoan1", "Trần Mai Anh (Kế toán)"
+  );
 
-  // Admin có toàn quyền xóa thành công
-  const adminDelete = templateVm.apiDeleteSampleItem(adminToken, firstItemId);
-  assert.strictEqual(adminDelete.success, true, adminDelete.message);
+  assert.strictEqual(projectVm.apiGetCarpentryReports(foremanToken, {}).success, false, "Foreman must NOT access P&L reports");
+  assert.strictEqual(projectVm.apiApproveQuotationAndStartOrder(techToken, { order_id: "X" }).success, false, "Tech must NOT approve orders");
+  assert.strictEqual(projectVm.apiUpdateItemProductionStage(accountantToken, { order_item_id: "X", to_stage: "CNC_CUTTING" }).success, false, "Accountant must NOT update production stage");
 
-  console.log("  [PASS] SampleService auto-numbering (SMP0001..SMP0012), mandatory pagination & 2-Tier RBAC verified.");
+  console.log("  [PASS] TEST 3: Created & verified Tech/Design, Foreman, Installer & Accountant RBAC matrices.");
 }
 
 // =========================================================================
-// TEST 4: KIỂM TRA CÚ PHÁP FRONTEND JS & ĐỐI CHIẾU 100% STATIC DOM ID
+// TEST 4: DANH MỤC VÁN GỖ & PHỤ KIỆN (`MATERIAL_CATALOG`) + RBAC GUARD
+// =========================================================================
+let mdfMatId, hingeMatId;
+{
+  const denyMat = projectVm.apiSaveMaterialCatalog(foremanToken, { item_name: "Test" });
+  assert.strictEqual(denyMat.success, false, "Foreman must NOT configure Material Catalog");
+
+  const m1 = projectVm.apiSaveMaterialCatalog(adminToken, {
+    catalog_kind: "RAW_MATERIAL",
+    category: "BOARD_WOOD",
+    item_name: "Ván MDF chống ẩm 17mm An Cường (Mã 388 EV)",
+    spec_material: "MDF lõi xanh chống ẩm 1220x2440",
+    unit: "Tấm",
+    default_cost_price: 520000,
+    stock_qty: 25,
+    min_stock_qty: 8
+  });
+  assert.strictEqual(m1.success, true, m1.message);
+  assert.strictEqual(m1.data.material_code, "VT0001");
+  mdfMatId = m1.data.id;
+
+  const m2 = projectVm.apiSaveMaterialCatalog(adminToken, {
+    catalog_kind: "RAW_MATERIAL",
+    category: "HARDWARE",
+    item_name: "Bản lề giảm chấn Inox 304 Hafele",
+    unit: "Cái",
+    default_cost_price: 45000,
+    stock_qty: 50,
+    min_stock_qty: 10
+  });
+  assert.strictEqual(m2.success, true, m2.message);
+  assert.strictEqual(m2.data.material_code, "VT0002");
+  hingeMatId = m2.data.id;
+
+  console.log("  [PASS] TEST 4: Raw Materials & Hardware Catalog (`VT0001`, `VT0002`) configured with RBAC guard.");
+}
+
+// =========================================================================
+// TEST 5: LUỒNG NGHIỆP VỤ KHÉP KÍN XƯỞNG MỘC (KHẢO SÁT -> ĐƠN MD/M2/CÁI ->
+//         BẢN VẼ DRIVE -> CỌC ĐỢT 1 -> XUẤT VÁN -> 6 CÔNG ĐOẠN CNC..QC ->
+//         TEM QR KIỆN -> ĐỢT 2 -> LẮP ĐẶT & NGHIỆM THU -> BẢO HÀNH -> LÃI/LỖ)
 // =========================================================================
 {
-  const htmlFiles = [
-    ...fs.readdirSync(path.join(templateSrcDir, "ui")).map((f) => path.join("ui", f)),
-    ...fs.readdirSync(path.join(templateSrcDir, "pages")).map((f) => path.join("pages", f))
-  ].filter((f) => f.endsWith(".html"));
+  // 5.1 Thêm Chủ đầu tư
+  const cu = projectVm.apiSaveCustomer(techToken, {
+    full_name: "Anh Trần Quốc Bảo",
+    phone: "0909888777",
+    site_address: "Căn hộ B12-08, Chung cư Cara River Park",
+    project_type: "APARTMENT",
+    lead_source: "ARCHITECT_PARTNER",
+    partner_name: "KTS Minh Khoa",
+    site_notes: "Chung cư chỉ thi công giờ hành chính, đăng ký thang hàng trước 1 ngày"
+  });
+  assert.strictEqual(cu.success, true, cu.message);
+  assert.strictEqual(cu.data.customer_code, "KH-00001");
+  assert.strictEqual(cu.data.phone, "0909888777", "Leading zero preserved");
+
+  // 5.2 Khảo sát đo đạc & chụp ảnh hiện trạng mặt bằng đẩy thẳng MockDriveApp
+  const dummyB64 = Buffer.from("FAKE_SITE_MEASUREMENT_IMAGE").toString("base64");
+  const srvRes = projectVm.apiSaveSurvey(techToken, {
+    customer_id: cu.data.id,
+    survey_area: "Phòng Bếp & Phòng Ngủ Master",
+    measurements_summary: "Tủ bếp trên/dưới: D3.2m; Tủ áo Master kịch trần: 2.4m x 2.6m",
+    site_constraints: "Vướng hộp kỹ thuật góc trái, chừa ổ cắm bếp từ",
+    photo_base64: dummyB64,
+    photo_file_name: "bep_hien_trang.jpg"
+  });
+  assert.strictEqual(srvRes.success, true, srvRes.message);
+  assert.ok(srvRes.data.survey.survey_code.startsWith("KS-"));
+  assert.ok(srvRes.data.photo && srvRes.data.photo.drive_url.includes("https://drive.google.com/uc?export=view&id="));
+
+  // 5.3 Lập Báo giá chi tiết hỗ trợ cả 3 đơn vị (md / m2 / cái) -> Tổng đúng 50.612.000đ + 3 đợt thanh toán 40-40-20
+  const ordCreate = projectVm.apiSaveQuotationOrder(techToken, {
+    survey_id: srvRes.data.survey.id,
+    customer_id: cu.data.id,
+    title: "Nội thất Căn hộ B12-08 (Bếp & Ngủ Master)",
+    payment_plan_code: "40-40-20",
+    warranty_months: 24,
+    items: [
+      { category: "KITCHEN", item_name: "Tủ bếp dưới MDF chống ẩm phủ Melamine", spec_material: "MDF 17mm 388 EV", calc_mode: "MD", length_m: 3.2, quantity: 1, unit_price: 3500000 },
+      { category: "KITCHEN", item_name: "Tủ bếp trên MDF chống ẩm phủ Acrylic", spec_material: "Acrylic bóng gương", calc_mode: "MD", length_m: 3.2, quantity: 1, unit_price: 4200000 },
+      { category: "BEDROOM", item_name: "Tủ quần áo Master kịch trần", spec_material: "MDF Melamine", calc_mode: "M2", length_m: 2.4, height_or_width_m: 2.6, quantity: 1, unit_price: 2800000 },
+      { category: "BEDROOM", item_name: "Giường ngủ bọc nỉ 1m8 x 2m", spec_material: "MDF bọc nỉ", calc_mode: "UNIT", quantity: 1, unit_price: 8500000 }
+    ]
+  });
+  assert.strictEqual(ordCreate.success, true, ordCreate.message);
+  const ord = ordCreate.data.order;
+  const ordItems = ordCreate.data.items;
+  const ordPays = ordCreate.data.payments;
+  assert.ok(ord.order_code.startsWith("NT-"));
+  assert.strictEqual(ord.total_amount, 50612000, "Expected 11.2M + 13.44M + 17.472M + 8.5M = 50,612,000 VND");
+  assert.strictEqual(ordPays.length, 3, "Expected 3 installment stages");
+  assert.strictEqual(ordPays.reduce((s, p) => s + p.due_amount, 0), 50612000, "Installments must sum to 100%");
+
+  // 5.4 Upload Bản vẽ kỹ thuật 2D/3D lên Drive
+  const upDraw = projectVm.apiUploadOrderFileOrPhoto(techToken, {
+    order_id: ord.id,
+    file_category: "DRAWING_2D",
+    title_or_room: "Bản vẽ kỹ thuật bóc tách Tủ bếp + Tủ áo",
+    file_name: "ban_ve_2d_NT001.pdf",
+    mime_type: "application/pdf",
+    base64: dummyB64
+  });
+  assert.strictEqual(upDraw.success, true, upDraw.message);
+  assert.ok(upDraw.data.drive_url.includes("DRV_CRP_"));
+
+  // 5.5 Kế toán thu Cọc Đợt 1 (40% = 20.244.800đ) -> Chuyển đơn sang DEPOSITED
+  const stage1Due = ordPays[0].due_amount;
+  const pay1 = projectVm.apiCollectOrderPayment(accountantToken, {
+    payment_id: ordPays[0].id,
+    amount: stage1Due,
+    payment_channel: "BANK_TRANSFER",
+    notes: "Khách chuyển khoản cọc Đợt 1"
+  });
+  assert.strictEqual(pay1.success, true, pay1.message);
+  assert.strictEqual(pay1.data.order.status, "DEPOSITED");
+
+  // 5.6 Quản lý duyệt Bản vẽ & Ra lệnh sản xuất tại xưởng
+  const startProd = projectVm.apiApproveQuotationAndStartOrder(adminToken, {
+    order_id: ord.id,
+    action: "START_PRODUCTION"
+  });
+  assert.strictEqual(startProd.success, true, startProd.message);
+  assert.strictEqual(startProd.data.status, "IN_PRODUCTION");
+  assert.strictEqual(startProd.data.drawing_status, "APPROVED");
+
+  // 5.7 Dự trù & Xuất kho vật tư ván gỗ/bản lề (kiểm tra chặn vượt tồn & tính giá vốn công trình)
+  const overStock = projectVm.apiEstimateOrIssueMaterial(foremanToken, {
+    order_id: ord.id,
+    material_id: mdfMatId,
+    issued_qty: 99
+  });
+  assert.strictEqual(overStock.success, false);
+  assert.strictEqual(overStock.errorCode, "INSUFFICIENT_MATERIAL_STOCK");
+
+  const issMdf = projectVm.apiEstimateOrIssueMaterial(foremanToken, {
+    order_id: ord.id,
+    material_id: mdfMatId,
+    estimated_qty: 18,
+    issued_qty: 18
+  });
+  assert.strictEqual(issMdf.success, true, issMdf.message);
+  assert.strictEqual(issMdf.data.order_financials.material_cost_total, 9360000); // 18 * 520k
+
+  const issHinge = projectVm.apiEstimateOrIssueMaterial(foremanToken, {
+    order_id: ord.id,
+    material_id: hingeMatId,
+    estimated_qty: 34,
+    issued_qty: 34
+  });
+  assert.strictEqual(issHinge.success, true, issHinge.message);
+  assert.strictEqual(issHinge.data.order_financials.material_cost_total, 10890000); // 9.36M + 34*45k (1.53M)
+
+  // 5.8 Tổ trưởng cập nhật toàn bộ 4 hạng mục qua các công đoạn tới QC_PACKED (6/6) -> 100%, tự mở khóa thu Đợt 2!
+  const stages = ["CNC_CUTTING", "EDGE_BANDING", "ASSEMBLY", "PU_PAINTING", "QC_PACKED"];
+  let lastStageRes = null;
+  for (const it of ordItems) {
+    for (const stCode of stages) {
+      lastStageRes = projectVm.apiUpdateItemProductionStage(foremanToken, { order_item_id: it.id, to_stage: stCode });
+      assert.strictEqual(lastStageRes.success, true, lastStageRes.message);
+    }
+  }
+  assert.strictEqual(lastStageRes.data.completion_pct, 100);
+  assert.strictEqual(lastStageRes.data.order_status, "READY_TO_SHIP");
+  assert.strictEqual(lastStageRes.data.stage2_payment_due, true, "Stage 2 payment must turn DUE when order reaches READY_TO_SHIP");
+
+  // 5.9 Tạo 2 Tem QR Kiện hàng & Quét QR tại công trình mở ngay link bản vẽ Drive
+  const genQr = projectVm.apiGenerateOrScanPackageQr(foremanToken, {
+    mode: "GENERATE",
+    order_id: ord.id,
+    room_or_item: "Phòng Bếp (Tủ Bếp Trên & Dưới)",
+    total_packages: 2,
+    contents_desc: "Thùng & Cánh Acrylic"
+  });
+  assert.strictEqual(genQr.success, true, genQr.message);
+  const qrCode1 = genQr.data[0].qr_code;
+  const scanRes = projectVm.apiGenerateOrScanPackageQr(installerToken, { mode: "SCAN", qr_code: qrCode1, mark_status: "DELIVERED_SITE" });
+  assert.strictEqual(scanRes.success, true, scanRes.message);
+  assert.strictEqual(scanRes.data.drawings_and_photos.length, 1);
+
+  // 5.10 Đội lắp đặt bị cảnh báo/chặn xuất xưởng khi chưa thu Đợt 2! Sau khi thu Đợt 2 -> Xuất xưởng thành công
+  const blockedShip = projectVm.apiUpdateDeliveryInstallStatus(installerToken, { order_id: ord.id, status: "INSTALLING" });
+  assert.strictEqual(blockedShip.success, false);
+  assert.strictEqual(blockedShip.errorCode, "STAGE2_UNPAID");
+
+  const stage2Due = ordPays[1].due_amount;
+  const pay2 = projectVm.apiCollectOrderPayment(accountantToken, { payment_id: ordPays[1].id, amount: stage2Due, payment_channel: "BANK_QR" });
+  assert.strictEqual(pay2.success, true, pay2.message);
+
+  const okShip = projectVm.apiUpdateDeliveryInstallStatus(installerToken, { order_id: ord.id, status: "INSTALLING" });
+  assert.strictEqual(okShip.success, true, okShip.message);
+  assert.strictEqual(okShip.data.status, "INSTALLING");
+
+  // 5.11 Nghiệm thu bàn giao & thu nốt Đợt 3 -> COMPLETED, nợ = 0, kích hoạt bảo hành 24 tháng
+  const stage3Due = ordPays[2].due_amount;
+  const accRes = projectVm.apiCompleteOrderAcceptance(adminToken, {
+    order_id: ord.id,
+    acceptance_signer: "Trần Quốc Bảo",
+    final_payment_amount: stage3Due
+  });
+  assert.strictEqual(accRes.success, true, accRes.message);
+  assert.strictEqual(accRes.data.order.status, "COMPLETED");
+  assert.strictEqual(accRes.data.order.debt_amount, 0);
+  assert.ok(accRes.data.warranty_until_date, "Warranty expiration date must be set");
+
+  // 5.12 Mở & Xử lý Phiếu Bảo Hành gắn đơn gốc
+  const wrnOpen = projectVm.apiSaveWarrantyTicket(installerToken, {
+    order_code: ord.order_code,
+    issue_desc: "Khách báo hơi xệ nhẹ bản lề cánh tủ bếp trên bên phải"
+  });
+  assert.strictEqual(wrnOpen.success, true, wrnOpen.message);
+  assert.ok(wrnOpen.data.ticket_code.startsWith("BH-"));
+  assert.strictEqual(projectVm.apiSaveWarrantyTicket(installerToken, { id: wrnOpen.data.id, status: "RESOLVED", repair_notes: "Đã cân chỉnh ốc bản lề êm" }).success, true);
+
+  // 5.13 Ghi chi nhập kho 10 tấm MDF qua Sổ quỹ (`MATERIAL_PURCHASE`: tồn 7 -> 17) & Báo cáo Lãi/Lỗ
+  const cashBuy = projectVm.apiCreateCashTransaction(accountantToken, {
+    tx_type: "OUT",
+    category: "MATERIAL_PURCHASE",
+    material_id: mdfMatId,
+    qty: 10,
+    amount: 5200000,
+    payment_channel: "BANK_TRANSFER",
+    description: "Nhập thêm 10 tấm MDF 17mm An Cường"
+  });
+  assert.strictEqual(cashBuy.success, true, cashBuy.message);
+  const mdfAfter = projectVm.apiGetMaterialCatalog(adminToken, { keyword: "VT0001" }, 1, 10).data.items[0];
+  assert.strictEqual(mdfAfter.stock_qty, 17, "MDF stock must drop 25->7 on issue and increment 7->17 on cash stock-in");
+
+  const rep = projectVm.apiGetCarpentryReports(adminToken, {});
+  assert.strictEqual(rep.success, true);
+  assert.strictEqual(rep.data.summary.total_contract_signed, 50612000);
+  assert.strictEqual(rep.data.summary.total_collected, 50612000);
+  assert.strictEqual(rep.data.summary.estimated_gross_profit, 50612000 - 10890000);
+
+  const dash = projectVm.apiGetCarpentryDashboard(adminToken);
+  assert.strictEqual(dash.success, true);
+  assert.strictEqual(dash.data.kpi.total_debt_receivable, 0);
+
+  console.log("  [PASS] TEST 5: Full Closed-Loop Carpentry Workflow (Survey+Drive -> md/m2/unit Order -> 40-40-20 -> Stock Issue -> 6 Prod Stages -> QR Scan -> Stage2 Ship Gate -> Acceptance+Warranty -> P&L Reports) passed!");
+}
+
+// =========================================================================
+// TEST 6: PHÂN TRANG BẮT BUỘC (10 + 2 KHÁCH HÀNG TRÊN 2 TRANG)
+// =========================================================================
+{
+  for (let i = 2; i <= 12; i++) {
+    const res = projectVm.apiSaveCustomer(techToken, {
+      full_name: `Chủ đầu tư ${i}`,
+      phone: `09770000${String(i).padStart(2, "0")}`,
+      site_address: `Căn hộ ${i}01`,
+      project_type: "APARTMENT"
+    });
+    assert.strictEqual(res.success, true, res.message);
+  }
+  const p1 = projectVm.apiGetCustomers(techToken, {}, 1, 10);
+  assert.strictEqual(p1.success, true);
+  assert.strictEqual(p1.data.items.length, 10);
+  assert.strictEqual(p1.data.pagination.total, 12);
+  assert.strictEqual(p1.data.pagination.totalPages, 2);
+  assert.strictEqual(p1.data.pagination.hasNext, true);
+
+  const p2 = projectVm.apiGetCustomers(techToken, {}, 2, 10);
+  assert.strictEqual(p2.success, true);
+  assert.strictEqual(p2.data.items.length, 2);
+  assert.strictEqual(p2.data.pagination.hasPrev, true);
+  console.log("  [PASS] TEST 6: Mandatory pagination (10 + 2 items across 2 pages) verified.");
+}
+
+// =========================================================================
+// TEST 7: KIỂM TRA CÚ PHÁP FRONTEND JS, STATIC DOM ID, RPC PARITY & RBAC GUARD
+// =========================================================================
+{
+  const uiFiles = fs.readdirSync(path.join(projectSrcDir, "ui")).filter((f) => f.endsWith(".html")).map((f) => path.join("ui", f));
+  const pageFiles = fs.readdirSync(path.join(projectSrcDir, "pages")).filter((f) => f.endsWith(".html")).map((f) => path.join("pages", f));
+  const htmlFiles = [...uiFiles, ...pageFiles];
+
+  const allKnownPerms = projectSpreadsheet.getSheetByName("PERMISSIONS")
+    .getRange(1, 1, projectSpreadsheet.getSheetByName("PERMISSIONS").getLastRow(), 5)
+    .getValues().map((r) => String(r[1] || ""));
 
   let scriptBlocksChecked = 0;
+  const missingRpcTargets = [];
   for (const relHtml of htmlFiles) {
-    const raw = fs.readFileSync(path.join(templateSrcDir, relHtml), "utf8");
+    const raw = fs.readFileSync(path.join(projectSrcDir, relHtml), "utf8");
     const scriptRegex = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
     let match;
     while ((match = scriptRegex.exec(raw)) !== null) {
       new vm.Script(match[1], { filename: relHtml });
       scriptBlocksChecked++;
     }
-  }
-  assert.ok(scriptBlocksChecked >= 8, "Expected at least 8 <script> blocks across ui/ and pages/");
 
-  // Thu thập toàn bộ id="..." định nghĩa trong HTML đã render (bao gồm cả template động bên trong JS)
+    const rpcCallRegex = /\.(api[A-Z][a-zA-Z0-9_]*)\s*\(/g;
+    let rpcMatch;
+    while ((rpcMatch = rpcCallRegex.exec(raw)) !== null) {
+      if (typeof projectVm[rpcMatch[1]] !== "function") {
+        missingRpcTargets.push(`${relHtml} -> ${rpcMatch[1]}()`);
+      }
+    }
+
+    if (relHtml.startsWith("pages")) {
+      assert.ok(!/ROLE_ADMIN|role\s*===\s*["']ADMIN["']|\.is_admin/.test(raw), `${relHtml} must not hardcode Admin role checks`);
+    }
+
+    const permCallRegex = /\.hasPermission\(\s*["']([a-zA-Z0-9_.-]+)["']\s*\)/g;
+    let pMatch;
+    while ((pMatch = permCallRegex.exec(raw)) !== null) {
+      assert.ok(allKnownPerms.includes(pMatch[1]), `${relHtml} references unknown permission '${pMatch[1]}'`);
+    }
+  }
+  assert.ok(scriptBlocksChecked >= 15, `Expected >= 15 <script> blocks, found ${scriptBlocksChecked}`);
+  assert.deepStrictEqual(missingRpcTargets, [], "Missing backend RPC targets: " + missingRpcTargets.join(", "));
+
   const definedIds = new Set();
   const idDefRegex = /\bid=["']([^"'+]+)["']/g;
   let idMatch;
@@ -496,84 +828,17 @@ const adminToken = loginRes.data.token;
 
   const missingDomIds = [];
   for (const relHtml of htmlFiles) {
-    const raw = fs.readFileSync(path.join(templateSrcDir, relHtml), "utf8");
-    // Bắt các lời gọi getElementById("static-id") không nối chuỗi động ở hai đầu
+    const raw = fs.readFileSync(path.join(projectSrcDir, relHtml), "utf8");
     const callRegex = /getElementById\(\s*["']([a-zA-Z0-9_-]+)["']\s*\)/g;
     let cm;
     while ((cm = callRegex.exec(raw)) !== null) {
-      // Kiểm tra xem ngay sau dấu nháy có phải phép cộng chuỗi động (ví dụ: "prefix-" + id) hay không
       const fullSnippet = raw.slice(Math.max(0, cm.index - 5), cm.index + cm[0].length + 5);
       if (fullSnippet.includes("+")) continue;
-      const targetId = cm[1];
-      if (!definedIds.has(targetId)) {
-        missingDomIds.push(`${relHtml} -> #${targetId}`);
-      }
+      if (!definedIds.has(cm[1])) missingDomIds.push(`${relHtml} -> #${cm[1]}`);
     }
   }
-
-  assert.deepStrictEqual(
-    missingDomIds,
-    [],
-    "Found static getElementById() calls missing from DOM: " + missingDomIds.join(", ")
-  );
-  console.log(`  [PASS] Verified JS syntax in ${scriptBlocksChecked} <script> blocks and 100% static DOM ID references.`);
+  assert.deepStrictEqual(missingDomIds, [], "Missing static DOM IDs: " + missingDomIds.join(", "));
+  console.log(`  [PASS] TEST 7: Verified JS syntax (${scriptBlocksChecked} blocks), 100% static DOM IDs, 100% RPC parity & permission-only UI guards.`);
 }
 
-// =========================================================================
-// TEST 5: KIỂM TRA SCRIPT CLONE DỰ ÁN MỚI (`scripts/new-project.ps1`)
-// =========================================================================
-{
-  const tempTarget = path.join(os.tmpdir(), "baseappscript-test-clone-" + Date.now());
-  const scriptPath = path.join(templateRoot, "scripts", "new-project.ps1");
-  try {
-    execFileSync(
-      "powershell",
-      [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        scriptPath,
-        "-AppCode",
-        "BOOKING",
-        "-AppName",
-        "Hệ Thống Đặt Lịch",
-        "-TargetDir",
-        tempTarget,
-        "-ScriptId",
-        "1BookingAppScriptIdMock888",
-        "-DeploymentId",
-        "AKfycbFixedDeploymentMock888",
-        "-CoreLibraryId",
-        "1CoreLibScriptIdMock999",
-        "-CoreVersion",
-        "3"
-      ],
-      { stdio: "pipe" }
-    );
-
-    const clonedCfg = fs.readFileSync(path.join(tempTarget, "src", "config", "ProjectConfig.gs"), "utf8");
-    const clonedClasp = JSON.parse(fs.readFileSync(path.join(tempTarget, ".clasp.json"), "utf8"));
-    const clonedManifest = JSON.parse(fs.readFileSync(path.join(tempTarget, "src", "appsscript.json"), "utf8"));
-    const clonedPkg = JSON.parse(fs.readFileSync(path.join(tempTarget, "package.json"), "utf8"));
-
-    assert.ok(clonedCfg.includes('APP_CODE: "BOOKING"'), "Cloned ProjectConfig.gs must stamp APP_CODE");
-    assert.ok(clonedCfg.includes('APP_NAME: "Hệ Thống Đặt Lịch"'), "Cloned ProjectConfig.gs must stamp APP_NAME");
-    assert.ok(clonedCfg.includes('SCRIPT_ID: "1BookingAppScriptIdMock888"'), "Cloned ProjectConfig.gs must stamp SCRIPT_ID");
-    assert.strictEqual(clonedClasp.scriptId, "1BookingAppScriptIdMock888", "Cloned .clasp.json must stamp scriptId");
-    assert.strictEqual(clonedClasp.deploymentId, "AKfycbFixedDeploymentMock888", "Cloned .clasp.json must stamp fixed deploymentId");
-    assert.strictEqual(clonedManifest.dependencies.libraries[0].libraryId, "1CoreLibScriptIdMock999");
-    assert.strictEqual(clonedManifest.dependencies.libraries[0].version, "3");
-    assert.strictEqual(clonedPkg.name, "project-booking", "Cloned package.json must update project name");
-    assert.ok(clonedPkg.scripts && clonedPkg.scripts.deploy, "Cloned package.json must expose npm run deploy");
-    assert.strictEqual(fs.existsSync(path.join(tempTarget, "scripts")), false, "Cloned project must exclude template bootstrap scripts/");
-
-    console.log("  [PASS] scripts/new-project.ps1 cloned and stamped new project configuration cleanly.");
-  } finally {
-    if (fs.existsSync(tempTarget)) {
-      fs.rmSync(tempTarget, { recursive: true, force: true });
-    }
-  }
-}
-
-console.log("=== ALL APP-TEMPLATE INTEGRATION TESTS PASSED (100%) ===\n");
+console.log("=== ALL 14-PROJECT-CARPENTRY INTEGRATION TESTS PASSED (100%) ===\n");
