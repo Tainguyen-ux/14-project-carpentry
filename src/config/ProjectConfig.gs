@@ -13,7 +13,7 @@ var PROJECT_CONFIG = {
   SESSION_TTL_HOURS: 24,
 
   // Apps Script ID riêng của dự án (tự động nhận diện qua ScriptApp.getScriptId() khi chạy thực tế)
-  SCRIPT_ID: "YOUR_PROJECT_SCRIPT_ID_HERE",
+  SCRIPT_ID: "1cMC9yASVXDq8cFZkyh-4pXLYfp6HP8T1hluBqyTIe8lEMxDqKvqZIvFV",
 
   // 1. Khai báo 12 Bảng Nghiệp vụ Xưởng Mộc & Nội thất (Readily Production: Chỉ tạo hàng Header, 0 dữ liệu mẫu)
   BUSINESS_SHEETS: {
