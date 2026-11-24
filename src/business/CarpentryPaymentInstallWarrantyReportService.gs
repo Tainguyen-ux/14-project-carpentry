@@ -41,100 +41,112 @@ function apiGetOrderPayments(token, filters, page, pageSize) {
   }
 }
 
+function collectOrderPaymentCore_(app, actor, dto, preloadedOrder) {
+  dto = dto || {};
+  var payId = String(dto.payment_id || "").trim();
+  var ordKey = String(dto.order_id || "").trim();
+  var amtInput = Math.max(0, Number(dto.amount) || 0);
+  if (amtInput <= 0) return app.Utils.buildResponse(false, null, "Số tiền thanh toán phải lớn hơn 0.", "INVALID_AMOUNT");
+
+  var policy = getCarpentryPolicyConfig_(app);
+  var todayYmd = getCarpentryTodayYmd_(app);
+  var nowStr = getCarpentryNowStr_(app);
+  var paySheet = PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME;
+  var ordSheet = PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME;
+
+  var payRow = payId
+    ? app.Data.findRow(paySheet, function(p) { return String(p.id) === payId || String(p.payment_code) === payId; })
+    : app.Data.findRow(paySheet, function(p) {
+        return (String(p.order_id) === ordKey || String(p.order_code) === ordKey) && p.status !== "PAID";
+      });
+
+  if (!payRow) return app.Utils.buildResponse(false, null, "Không tìm thấy đợt thanh toán cần thu.", "PAYMENT_NOT_FOUND");
+  var ord = (preloadedOrder && String(preloadedOrder.id) === String(payRow.order_id))
+    ? preloadedOrder
+    : app.Data.findRow(ordSheet, function(o) { return String(o.id) === String(payRow.order_id); });
+  if (!ord) return app.Utils.buildResponse(false, null, "Không tìm thấy đơn hàng liên kết.", "ORDER_NOT_FOUND");
+
+  var curPaidStage = Number(payRow.paid_amount) || 0;
+  var dueStage = Number(payRow.due_amount) || 0;
+  var stageRemaining = Math.max(0, dueStage - curPaidStage);
+  var actualCollect = Math.min(amtInput, Math.max(stageRemaining, Number(ord.debt_amount) || 0));
+  if (actualCollect <= 0) actualCollect = amtInput;
+
+  var newStagePaid = curPaidStage + actualCollect;
+  var stageStatus = newStagePaid >= dueStage ? "PAID" : "PARTIAL";
+  var channel = String(dto.payment_channel || "BANK_TRANSFER").toUpperCase();
+
+  app.Data.updateById(paySheet, payRow.id, {
+    paid_amount: newStagePaid,
+    payment_channel: channel,
+    paid_at: nowStr,
+    status: stageStatus,
+    collected_by_name: String(actor.full_name || actor.username),
+    notes: String(dto.notes || "").trim(),
+    updated_at: nowStr
+  });
+
+  var newOrderPaid = (Number(ord.paid_amount) || 0) + actualCollect;
+  var newOrderDebt = Math.max(0, (Number(ord.total_amount) || 0) - newOrderPaid);
+  var newOrdStatus = ord.status;
+  if ((ord.status === "SURVEYING" || ord.status === "QUOTED") && Number(payRow.stage_no) === 1 && stageStatus === "PAID") {
+    newOrdStatus = "DEPOSITED";
+  }
+
+  app.Data.updateById(ordSheet, ord.id, {
+    paid_amount: newOrderPaid,
+    debt_amount: newOrderDebt,
+    status: newOrdStatus,
+    updated_at: nowStr
+  });
+
+  var cust = app.Data.findRow(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME, function(c) { return String(c.id) === String(ord.customer_id); });
+  if (cust) {
+    app.Data.updateById(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME, cust.id, {
+      total_paid: (Number(cust.total_paid) || 0) + actualCollect,
+      debt_balance: Math.max(0, (Number(cust.debt_balance) || 0) - actualCollect),
+      updated_at: nowStr
+    });
+  }
+
+  var txSheet = PROJECT_CONFIG.BUSINESS_SHEETS.CASH_TRANSACTIONS.NAME;
+  app.Data.insertOne(txSheet, {
+    id: app.Utils.generateUUID(),
+    tx_code: generateDailyCarpentryCode_(app.Data.getAll(txSheet), "tx_code", "TC", todayYmd),
+    tx_type: "IN",
+    category: "ORDER_PAYMENT",
+    payment_channel: channel,
+    amount: actualCollect,
+    order_id: ord.id,
+    order_code: ord.order_code,
+    customer_name: ord.customer_name,
+    description: "Thu tiền " + payRow.stage_name + " (" + ord.order_code + ")",
+    performed_by: String(actor.id),
+    performed_by_name: String(actor.full_name || actor.username),
+    tx_date: todayYmd,
+    created_at: nowStr
+  });
+
+  app.Audit.log({ actor: actor, action: "COLLECT_PAYMENT", entity_type: paySheet, entity_id: payRow.id, entity_number: ord.order_code, after: { paid_amount: actualCollect, new_order_debt: newOrderDebt }, message: "Thu " + actualCollect + "đ " + payRow.stage_name + " đơn " + ord.order_code });
+  var updatedOrdRaw = Object.assign({}, ord, { paid_amount: newOrderPaid, debt_amount: newOrderDebt, status: newOrdStatus });
+  return app.Utils.buildResponse(true, {
+    payment_status: stageStatus,
+    collected_amount: actualCollect,
+    raw_order: updatedOrdRaw,
+    order: sanitizeOrderForActor_(enrichFurnitureOrderRow_(updatedOrdRaw, todayYmd, policy), actor)
+  }, "Đã thu " + actualCollect.toLocaleString("en-US") + "đ (" + payRow.stage_name + ")!");
+}
+
 function apiCollectOrderPayment(token, dto) {
   var app = getCore_(token);
   try {
     var actor = app.Authorization.require("payment.create");
-    dto = dto || {};
-    var payId = String(dto.payment_id || "").trim();
-    var ordKey = String(dto.order_id || "").trim();
-    var amtInput = Math.max(0, Number(dto.amount) || 0);
-    if (amtInput <= 0) return toRpcJson_(app.Utils.buildResponse(false, null, "Số tiền thanh toán phải lớn hơn 0.", "INVALID_AMOUNT"));
-
     var result = app.Utils.withLock(function() {
-      var policy = getCarpentryPolicyConfig_(app);
-      var todayYmd = getCarpentryTodayYmd_(app);
-      var nowStr = getCarpentryNowStr_(app);
-      var paySheet = PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME;
-      var ordSheet = PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME;
-
-      var payRow = payId
-        ? app.Data.findRow(paySheet, function(p) { return String(p.id) === payId || String(p.payment_code) === payId; })
-        : app.Data.findRow(paySheet, function(p) {
-            return (String(p.order_id) === ordKey || String(p.order_code) === ordKey) && p.status !== "PAID";
-          });
-
-      if (!payRow) return app.Utils.buildResponse(false, null, "Không tìm thấy đợt thanh toán cần thu.", "PAYMENT_NOT_FOUND");
-      var ord = app.Data.findRow(ordSheet, function(o) { return String(o.id) === String(payRow.order_id); });
-      if (!ord) return app.Utils.buildResponse(false, null, "Không tìm thấy đơn hàng liên kết.", "ORDER_NOT_FOUND");
-
-      var curPaidStage = Number(payRow.paid_amount) || 0;
-      var dueStage = Number(payRow.due_amount) || 0;
-      var stageRemaining = Math.max(0, dueStage - curPaidStage);
-      var actualCollect = Math.min(amtInput, Math.max(stageRemaining, Number(ord.debt_amount) || 0));
-      if (actualCollect <= 0) actualCollect = amtInput;
-
-      var newStagePaid = curPaidStage + actualCollect;
-      var stageStatus = newStagePaid >= dueStage ? "PAID" : "PARTIAL";
-      var channel = String(dto.payment_channel || "BANK_TRANSFER").toUpperCase();
-
-      app.Data.updateById(paySheet, payRow.id, {
-        paid_amount: newStagePaid,
-        payment_channel: channel,
-        paid_at: nowStr,
-        status: stageStatus,
-        collected_by_name: String(actor.full_name || actor.username),
-        notes: String(dto.notes || "").trim(),
-        updated_at: nowStr
-      });
-
-      var newOrderPaid = (Number(ord.paid_amount) || 0) + actualCollect;
-      var newOrderDebt = Math.max(0, (Number(ord.total_amount) || 0) - newOrderPaid);
-      var newOrdStatus = ord.status;
-      if ((ord.status === "SURVEYING" || ord.status === "QUOTED") && Number(payRow.stage_no) === 1 && stageStatus === "PAID") {
-        newOrdStatus = "DEPOSITED";
+      var res = collectOrderPaymentCore_(app, actor, dto, null);
+      if (res && res.success && res.data && res.data.raw_order) {
+        delete res.data.raw_order;
       }
-
-      app.Data.updateById(ordSheet, ord.id, {
-        paid_amount: newOrderPaid,
-        debt_amount: newOrderDebt,
-        status: newOrdStatus,
-        updated_at: nowStr
-      });
-
-      var cust = app.Data.findRow(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME, function(c) { return String(c.id) === String(ord.customer_id); });
-      if (cust) {
-        app.Data.updateById(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME, cust.id, {
-          total_paid: (Number(cust.total_paid) || 0) + actualCollect,
-          debt_balance: Math.max(0, (Number(cust.debt_balance) || 0) - actualCollect),
-          updated_at: nowStr
-        });
-      }
-
-      var txSheet = PROJECT_CONFIG.BUSINESS_SHEETS.CASH_TRANSACTIONS.NAME;
-      app.Data.insertOne(txSheet, {
-        id: app.Utils.generateUUID(),
-        tx_code: generateDailyCarpentryCode_(app.Data.getAll(txSheet), "tx_code", "TC", todayYmd),
-        tx_type: "IN",
-        category: "ORDER_PAYMENT",
-        payment_channel: channel,
-        amount: actualCollect,
-        order_id: ord.id,
-        order_code: ord.order_code,
-        customer_name: ord.customer_name,
-        description: "Thu tiền " + payRow.stage_name + " (" + ord.order_code + ")",
-        performed_by: String(actor.id),
-        performed_by_name: String(actor.full_name || actor.username),
-        tx_date: todayYmd,
-        created_at: nowStr
-      });
-
-      app.Audit.log({ actor: actor, action: "COLLECT_PAYMENT", entity_type: paySheet, entity_id: payRow.id, entity_number: ord.order_code, after: { paid_amount: actualCollect, new_order_debt: newOrderDebt }, message: "Thu " + actualCollect + "đ " + payRow.stage_name + " đơn " + ord.order_code });
-      return app.Utils.buildResponse(true, {
-        payment_status: stageStatus,
-        collected_amount: actualCollect,
-        order: enrichFurnitureOrderRow_(Object.assign({}, ord, { paid_amount: newOrderPaid, debt_amount: newOrderDebt, status: newOrdStatus }), todayYmd, policy)
-      }, "Đã thu " + actualCollect.toLocaleString("en-US") + "đ (" + payRow.stage_name + ")!");
+      return res;
     }, 10000);
 
     return toRpcJson_(result);
@@ -159,12 +171,30 @@ function apiUpdateDeliveryInstallStatus(token, dto) {
     if (!ord) return toRpcJson_(app.Utils.buildResponse(false, null, "Không tìm thấy đơn hàng.", "NOT_FOUND"));
 
     // Kiểm tra Đợt 2 trước khi xuất xưởng giao đi lắp đặt (nếu bật REQUIRE_STAGE2_PAY_BEFORE_SHIP)
-    if (targetStatus === "INSTALLING" && policy.requireStage2PayBeforeShip && !dto.override_payment_check) {
-      var stage2Pay = app.Data.findRow(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, function(p) {
-        return String(p.order_id) === String(ord.id) && p.due_trigger === "READY_TO_SHIP";
+    if (targetStatus === "INSTALLING" && policy.requireStage2PayBeforeShip) {
+      var orderPays = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, function(p) {
+        return String(p.order_id) === String(ord.id);
       });
+      var stage2Pay = orderPays.find(function(p) { return p.due_trigger === "READY_TO_SHIP"; });
       if (stage2Pay && stage2Pay.status !== "PAID" && Number(stage2Pay.due_amount) > 0) {
-        return toRpcJson_(app.Utils.buildResponse(false, null, "Cảnh báo xuất xưởng: Khách chưa thanh toán đủ " + stage2Pay.stage_name + " (" + Number(stage2Pay.due_amount).toLocaleString("en-US") + "đ). Vui lòng thu Đợt 2 hoặc xác nhận bỏ qua!", "STAGE2_UNPAID"));
+        if (!dto.override_payment_check) {
+          return toRpcJson_(app.Utils.buildResponse(false, null, "Cảnh báo xuất xưởng: Khách chưa thanh toán đủ " + stage2Pay.stage_name + " (" + Number(stage2Pay.due_amount).toLocaleString("en-US") + "đ). Vui lòng thu Đợt 2 hoặc nhờ Quản lý xác nhận bỏ qua!", "STAGE2_UNPAID"));
+        }
+        if (!actorHasAnyPerm_(actor, ["order.approve", "payment.create"])) {
+          return toRpcJson_(app.Utils.buildResponse(false, null, "Bạn không có quyền bỏ qua kiểm soát thanh toán Đợt 2 (cần quyền order.approve hoặc payment.create).", "OVERRIDE_FORBIDDEN"));
+        }
+      }
+      // Bật Đợt 3 thành DUE khi xe bắt đầu đi lắp đặt tại nhà khách (tái sử dụng orderPays, không đọc lại Sheet)
+      var stage3 = orderPays.find(function(p) { return p.due_trigger === "ON_HANDOVER" && p.status === "NOT_DUE"; });
+      if (stage3) {
+        app.Data.updateById(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, stage3.id, { status: "DUE", updated_at: nowStr });
+      }
+    } else if (targetStatus === "INSTALLING") {
+      var stage3NoGate = app.Data.findRow(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, function(p) {
+        return String(p.order_id) === String(ord.id) && p.due_trigger === "ON_HANDOVER" && p.status === "NOT_DUE";
+      });
+      if (stage3NoGate) {
+        app.Data.updateById(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, stage3NoGate.id, { status: "DUE", updated_at: nowStr });
       }
     }
 
@@ -175,18 +205,8 @@ function apiUpdateDeliveryInstallStatus(token, dto) {
     }
     app.Data.updateById(ordSheet, ord.id, upd);
 
-    // Bật Đợt 3 thành DUE khi xe bắt đầu đi lắp đặt tại nhà khách
-    if (targetStatus === "INSTALLING") {
-      var stage3 = app.Data.findRow(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, function(p) {
-        return String(p.order_id) === String(ord.id) && p.due_trigger === "ON_HANDOVER" && p.status === "NOT_DUE";
-      });
-      if (stage3) {
-        app.Data.updateById(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, stage3.id, { status: "DUE", updated_at: nowStr });
-      }
-    }
-
-    app.Audit.log({ actor: actor, action: "DELIVERY_STATUS", entity_type: ordSheet, entity_id: ord.id, entity_number: ord.order_code, after: upd, message: "Đơn " + ord.order_code + " -> " + targetStatus });
-    return toRpcJson_(app.Utils.buildResponse(true, enrichFurnitureOrderRow_(Object.assign({}, ord, upd), todayYmd, policy), "Đã cập nhật trạng thái giao hàng / lắp đặt đơn " + ord.order_code + "!"));
+    app.Audit.log({ actor: actor, action: "DELIVERY_STATUS", entity_type: ordSheet, entity_id: ord.id, entity_number: ord.order_code, after: upd, message: "Đơn " + ord.order_code + " -> " + targetStatus + (dto.override_payment_check ? " (Override Đợt 2)" : "") });
+    return toRpcJson_(app.Utils.buildResponse(true, sanitizeOrderForActor_(enrichFurnitureOrderRow_(Object.assign({}, ord, upd), todayYmd, policy), actor), "Đã cập nhật trạng thái giao hàng / lắp đặt đơn " + ord.order_code + "!"));
   } catch (err) {
     return toRpcJson_(app.Utils.buildResponse(false, null, err.message, "DELIVERY_ERROR"));
   }
@@ -198,57 +218,69 @@ function apiCompleteOrderAcceptance(token, dto) {
     var actor = app.Authorization.require("acceptance.sign");
     dto = dto || {};
     var ordKey = String(dto.order_id || "").trim();
-    var policy = getCarpentryPolicyConfig_(app);
-    var todayYmd = getCarpentryTodayYmd_(app);
-    var nowStr = getCarpentryNowStr_(app);
+    var finalAmt = Math.max(0, Number(dto.final_payment_amount) || 0);
 
-    var ordSheet = PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME;
-    var ord = app.Data.findRow(ordSheet, function(o) { return String(o.id) === ordKey || String(o.order_code) === ordKey; });
-    if (!ord) return toRpcJson_(app.Utils.buildResponse(false, null, "Không tìm thấy đơn hàng.", "NOT_FOUND"));
-
-    // Đánh dấu các hạng mục đã giao xong
-    var items = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_ITEMS.NAME, function(x) { return String(x.order_id) === String(ord.id); });
-    for (var i = 0; i < items.length; i++) {
-      app.Data.updateById(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_ITEMS.NAME, items[i].id, { delivered_ok: "TRUE", updated_at: nowStr });
+    if (finalAmt > 0 && !actorHasPerm_(actor, "payment.create")) {
+      return toRpcJson_(app.Utils.buildResponse(false, null, "Bạn không có quyền thu tiền (payment.create). Vui lòng để trống số tiền thu đợt cuối hoặc nhờ Kế toán thu tiền.", "AUTH_FORBIDDEN"));
     }
 
-    // Nếu kèm thu tiền đợt cuối ngay tại biên bản nghiệm thu
-    var paidAdd = 0;
-    if (Number(dto.final_payment_amount) > 0) {
-      if (actor.is_admin || app.Authorization.has("payment.create")) {
-        var colRes = apiCollectOrderPayment(token, {
+    var result = app.Utils.withLock(function() {
+      var policy = getCarpentryPolicyConfig_(app);
+      var todayYmd = getCarpentryTodayYmd_(app);
+      var nowStr = getCarpentryNowStr_(app);
+
+      var ordSheet = PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME;
+      var ord = app.Data.findRow(ordSheet, function(o) { return String(o.id) === ordKey || String(o.order_code) === ordKey; });
+      if (!ord) return app.Utils.buildResponse(false, null, "Không tìm thấy đơn hàng.", "NOT_FOUND");
+
+      // Đánh dấu hàng loạt các hạng mục đã giao xong (1 lần replaceByColumn thay vì N lần updateById)
+      var itemSheet = PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_ITEMS.NAME;
+      var items = app.Data.findRows(itemSheet, function(x) { return String(x.order_id) === String(ord.id); });
+      if (items.length > 0) {
+        var updatedItems = items.map(function(it) {
+          return Object.assign({}, it, { delivered_ok: "TRUE", updated_at: nowStr });
+        });
+        app.Data.replaceByColumn(itemSheet, "order_id", ord.id, updatedItems);
+      }
+
+      // Nếu kèm thu tiền đợt cuối ngay tại biên bản nghiệm thu (chạy nội bộ, không lặp getCore_/verifyActor_)
+      var paidAdd = 0;
+      if (finalAmt > 0) {
+        var colRes = collectOrderPaymentCore_(app, actor, {
           order_id: ord.id,
-          amount: Number(dto.final_payment_amount),
+          amount: finalAmt,
           payment_channel: dto.payment_channel || "BANK_QR",
           notes: "Thu đợt cuối khi ký nghiệm thu bàn giao"
-        });
+        }, ord);
         if (colRes && colRes.success && colRes.data) {
           paidAdd = colRes.data.collected_amount || 0;
-          ord = app.Data.findRow(ordSheet, function(o) { return String(o.id) === String(ord.id); });
+          if (colRes.data.raw_order) ord = colRes.data.raw_order;
         }
       }
-    }
 
-    var wMonths = Number(ord.warranty_months) || policy.defaultWarrantyMonths;
-    var warrantyUntil = addCarpentryMonthsYmd_(todayYmd, wMonths);
-    var upd = {
-      status: "COMPLETED",
-      completion_pct: 100,
-      completed_at: nowStr,
-      warranty_months: wMonths,
-      warranty_until_date: warrantyUntil,
-      acceptance_signer: String(dto.acceptance_signer || ord.customer_name).trim(),
-      acceptance_notes: String(dto.acceptance_notes || "Khách hàng đã kiểm tra & ký nghiệm thu hoàn thiện").trim(),
-      updated_at: nowStr
-    };
-    app.Data.updateById(ordSheet, ord.id, upd);
+      var wMonths = Number(ord.warranty_months) || policy.defaultWarrantyMonths;
+      var warrantyUntil = addCarpentryMonthsYmd_(todayYmd, wMonths);
+      var upd = {
+        status: "COMPLETED",
+        completion_pct: 100,
+        completed_at: nowStr,
+        warranty_months: wMonths,
+        warranty_until_date: warrantyUntil,
+        acceptance_signer: String(dto.acceptance_signer || ord.customer_name).trim(),
+        acceptance_notes: String(dto.acceptance_notes || "Khách hàng đã kiểm tra & ký nghiệm thu hoàn thiện").trim(),
+        updated_at: nowStr
+      };
+      app.Data.updateById(ordSheet, ord.id, upd);
 
-    app.Audit.log({ actor: actor, action: "ACCEPTANCE_COMPLETE", entity_type: ordSheet, entity_id: ord.id, entity_number: ord.order_code, after: upd, message: "Nghiệm thu bàn giao " + ord.order_code + " - Bảo hành đến " + warrantyUntil });
-    return toRpcJson_(app.Utils.buildResponse(true, {
-      order: enrichFurnitureOrderRow_(Object.assign({}, ord, upd), todayYmd, policy),
-      final_collected: paidAdd,
-      warranty_until_date: warrantyUntil
-    }, "Đã hoàn tất nghiệm thu đơn " + ord.order_code + " & kích hoạt bảo hành đến " + warrantyUntil + "!"));
+      app.Audit.log({ actor: actor, action: "ACCEPTANCE_COMPLETE", entity_type: ordSheet, entity_id: ord.id, entity_number: ord.order_code, after: upd, message: "Nghiệm thu bàn giao " + ord.order_code + " - Bảo hành đến " + warrantyUntil });
+      return app.Utils.buildResponse(true, {
+        order: sanitizeOrderForActor_(enrichFurnitureOrderRow_(Object.assign({}, ord, upd), todayYmd, policy), actor),
+        final_collected: paidAdd,
+        warranty_until_date: warrantyUntil
+      }, "Đã hoàn tất nghiệm thu đơn " + ord.order_code + " & kích hoạt bảo hành đến " + warrantyUntil + "!");
+    }, 15000);
+
+    return toRpcJson_(result);
   } catch (err) {
     return toRpcJson_(app.Utils.buildResponse(false, null, err.message, "ACCEPTANCE_ERROR"));
   }
@@ -462,7 +494,7 @@ function apiCreateCashTransaction(token, dto) {
     };
     app.Data.insertOne(txSheet, row);
 
-    if (linkedOrd) recalculateOrderFinancials_(app, linkedOrd.id, nowStr);
+    if (linkedOrd) recalculateOrderFinancials_(app, linkedOrd.id, nowStr, linkedOrd);
 
     return toRpcJson_(app.Utils.buildResponse(true, row, "Đã ghi sổ quỹ " + row.tx_code + "!" + stockUpdatedNote));
   } catch (err) {
@@ -473,12 +505,21 @@ function apiCreateCashTransaction(token, dto) {
 function apiGetCarpentryDashboard(token) {
   var app = getCore_(token);
   try {
-    app.Authorization.requireAny(["menu.surveys", "menu.orders", "menu.production", "order.view", "order.view_all"]);
+    var actor = app.Authorization.requireAny([
+      "menu.dashboard", "menu.surveys", "menu.orders", "menu.drawings", "menu.production",
+      "menu.materials", "menu.payments", "menu.install_warranty", "menu.customers", "menu.reports_cash",
+      "order.view", "order.view_all", "debt.view", "warranty.manage", "report.view", "profit_report.view"
+    ]);
     var policy = getCarpentryPolicyConfig_(app);
     var todayYmd = getCarpentryTodayYmd_(app);
+
+    var canViewFinancials = actorHasAnyPerm_(actor, ["order.view_all", "report.view", "profit_report.view", "payment.create", "debt.view"]);
+    var canViewDebt = actorHasAnyPerm_(actor, ["debt.view", "payment.create", "order.view_all"]);
+    var canViewMaterials = actorHasAnyPerm_(actor, ["material.estimate", "material.issue", "material.expense_create", "menu.materials", "order.view_all"]);
+
     var orders = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME);
-    var catalog = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.MATERIAL_CATALOG.NAME);
-    var payments = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME);
+    var catalog = canViewMaterials ? app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.MATERIAL_CATALOG.NAME) : [];
+    var payments = canViewDebt ? app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME) : [];
 
     var inProd = 0, installing = 0, upcomingDue = 0, delayedCount = 0, awaitingDrawing = 0;
     var activeValue = 0, totalDebt = 0;
@@ -490,11 +531,11 @@ function apiGetCarpentryDashboard(token) {
       var o = enrichFurnitureOrderRow_(raw, todayYmd, policy);
       if (o.status === "DEPOSITED" || o.status === "IN_PRODUCTION" || o.status === "READY_TO_SHIP") {
         inProd++;
-        activeValue += o.total_amount;
+        if (canViewFinancials) activeValue += o.total_amount;
       }
       if (o.status === "INSTALLING") {
         installing++;
-        activeValue += o.total_amount;
+        if (canViewFinancials) activeValue += o.total_amount;
       }
       if (o.drawing_status !== "APPROVED" && o.status !== "COMPLETED") awaitingDrawing++;
       if (o.days_to_due !== null && o.days_to_due >= 0 && o.days_to_due <= policy.upcomingDeliveryDays && ["DEPOSITED", "IN_PRODUCTION", "READY_TO_SHIP", "INSTALLING"].indexOf(o.status) !== -1) {
@@ -502,29 +543,34 @@ function apiGetCarpentryDashboard(token) {
       }
       if (o.is_late || o.is_urgent_delay) {
         delayedCount++;
-        alertOrders.push(o);
+        alertOrders.push(sanitizeOrderForActor_(o, actor));
       }
-      totalDebt += o.debt_amount;
+      if (canViewDebt) totalDebt += o.debt_amount;
     }
 
-    var dueStagePayments = payments.filter(function(p) { return p && p.status === "DUE"; });
-    var lowStockItems = catalog.filter(function(m) {
+    var dueStagePayments = canViewDebt ? payments.filter(function(p) { return p && p.status === "DUE"; }) : [];
+    var lowStockItems = canViewMaterials ? catalog.filter(function(m) {
       if (!m || !m.id || m.catalog_kind === "ITEM_TEMPLATE") return false;
       return (Number(m.stock_qty) || 0) <= (Number(m.min_stock_qty) || policy.lowStockThresholdDefault);
-    });
+    }) : [];
 
     return toRpcJson_(app.Utils.buildResponse(true, {
       today: todayYmd,
+      permissions: {
+        can_view_financials: canViewFinancials,
+        can_view_debt: canViewDebt,
+        can_view_materials: canViewMaterials
+      },
       kpi: {
         in_production_count: inProd,
         installing_count: installing,
         upcoming_due_count: upcomingDue,
         delayed_or_urgent_count: delayedCount,
         awaiting_drawing_count: awaitingDrawing,
-        active_orders_value: activeValue,
-        total_debt_receivable: totalDebt,
-        due_stage_payments_count: dueStagePayments.length,
-        low_stock_materials_count: lowStockItems.length
+        active_orders_value: canViewFinancials ? activeValue : null,
+        total_debt_receivable: canViewDebt ? totalDebt : null,
+        due_stage_payments_count: canViewDebt ? dueStagePayments.length : null,
+        low_stock_materials_count: canViewMaterials ? lowStockItems.length : null
       },
       urgent_orders: alertOrders.slice(0, 8),
       due_payments: dueStagePayments.slice(0, 8),
@@ -538,11 +584,11 @@ function apiGetCarpentryDashboard(token) {
 function apiGetCarpentryReports(token, filters) {
   var app = getCore_(token);
   try {
-    app.Authorization.requireAny(["report.view", "profit_report.view"]);
+    var actor = app.Authorization.requireAny(["report.view", "profit_report.view"]);
     filters = filters || {};
     var todayYmd = getCarpentryTodayYmd_(app);
     var monthKey = String(filters.month_key || todayYmd.substring(0, 7)).trim();
-    var canSeeProfit = app.Authorization.has("profit_report.view");
+    var canSeeProfit = actorHasPerm_(actor, "profit_report.view");
 
     var orders = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME);
     var totalContractSigned = 0, totalCollected = 0, totalMatCost = 0, totalExtraCost = 0;
@@ -575,10 +621,10 @@ function apiGetCarpentryReports(token, filters) {
         status: o.status,
         total_amount: tAmt,
         paid_amount: pAmt,
-        material_cost_total: canSeeProfit ? mCost : 0,
-        labor_extra_cost: canSeeProfit ? eCost : 0,
-        gross_profit: canSeeProfit ? gp : 0,
-        gross_margin_pct: (canSeeProfit && tAmt > 0) ? Number(((gp / tAmt) * 100).toFixed(1)) : 0
+        material_cost_total: canSeeProfit ? mCost : null,
+        labor_extra_cost: canSeeProfit ? eCost : null,
+        gross_profit: canSeeProfit ? gp : null,
+        gross_margin_pct: (canSeeProfit && tAmt > 0) ? Number(((gp / tAmt) * 100).toFixed(1)) : null
       });
     }
 
@@ -588,12 +634,13 @@ function apiGetCarpentryReports(token, filters) {
 
     return toRpcJson_(app.Utils.buildResponse(true, {
       month_key: monthKey,
+      can_see_profit: canSeeProfit,
       summary: {
         total_contract_signed: totalContractSigned,
         total_collected: totalCollected,
-        total_material_and_extra_cost: canSeeProfit ? totalCostAll : 0,
-        estimated_gross_profit: canSeeProfit ? grossProfitAll : 0,
-        gross_margin_pct: canSeeProfit ? marginAll : 0,
+        total_material_and_extra_cost: canSeeProfit ? totalCostAll : null,
+        estimated_gross_profit: canSeeProfit ? grossProfitAll : null,
+        gross_margin_pct: canSeeProfit ? marginAll : null,
         orders_count: projectRows.length
       },
       project_profit_list: projectRows.reverse(),

@@ -30,8 +30,8 @@
     filterStatus: "IN_PRODUCTION",
 
     onInit: function() {
-      var self = this;
-      CARPENTRY_HELPER.loadMeta(function() { self.loadBoard(1); });
+      CARPENTRY_HELPER.loadMeta();
+      this.loadBoard(1);
     },
 
     onReload: function() { this.loadBoard(this.page); },
@@ -49,10 +49,17 @@
       google.script.run
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
-          if (!res || !res.success || !res.data) return;
+          if (!res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Lỗi tải tiến độ xưởng.", "error");
+            return;
+          }
           self.renderBoard(res.data.items || [], res.data.pagination);
         })
-        .apiGetFurnitureOrders(AUTH.getToken(), { status: this.filterStatus }, this.page, this.pageSize);
+        .withFailureHandler(function(err) {
+          APP.stopPageLoading();
+          APP.showToast((err && err.message) || String(err), "error");
+        })
+        .apiGetFurnitureOrders(AUTH.getToken(), { status: this.filterStatus, include_items: true }, this.page, this.pageSize);
     },
 
     renderBoard: function(orders, pagination) {
@@ -67,7 +74,38 @@
       }
       if (empty) empty.style.display = "none";
 
+      var defaultStages = [
+        { code: "MATERIALS_READY", order: 1, name: "1️⃣ Nhập vật tư ván & PK" },
+        { code: "CNC_CUTTING", order: 2, name: "2️⃣ Cắt ván CNC" },
+        { code: "EDGE_BANDING", order: 3, name: "3️⃣ Dán cạnh & Khoan cam" },
+        { code: "ASSEMBLY", order: 4, name: "4️⃣ Lắp ráp thô" },
+        { code: "PU_PAINTING", order: 5, name: "5️⃣ Sơn PU / Hoàn thiện" },
+        { code: "QC_PACKED", order: 6, name: "6️⃣ QC & Đóng gói" }
+      ];
+      var stages = (CARPENTRY_HELPER.metaCache && CARPENTRY_HELPER.metaCache.policy && CARPENTRY_HELPER.metaCache.policy.productionStages) || defaultStages;
+      var canUpdate = APP.hasPermission("production.stage_update");
+
       grid.innerHTML = orders.map(function(o) {
+        var items = o.items || [];
+        var itemsHtml = items.length
+          ? items.map(function(it) {
+              var curIdx = stages.findIndex(function(s) { return s.code === it.production_stage; });
+              var nextStage = (curIdx >= 0 && curIdx + 1 < stages.length) ? stages[curIdx + 1] : null;
+              var rightEl = "";
+              if (!nextStage) {
+                rightEl = '<span style="color:#059669;font-weight:700;">✅ Xong QC</span>';
+              } else if (canUpdate) {
+                rightEl = '<button type="button" class="btn btn-primary btn-sm" onclick="PRODUCTION_CLIENT.advanceStage(\'' + it.id + '\',\'' + nextStage.code + '\')">👉 ' + UTILS.escapeHtml(nextStage.name) + '</button>';
+              } else {
+                rightEl = '<span class="crp-badge">' + UTILS.escapeHtml(it.stage_label || it.production_stage) + '</span>';
+              }
+              return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed #e2e8f0;">' +
+                '<div><strong>' + UTILS.escapeHtml(it.item_name) + '</strong><div style="font-size:11.5px;color:#64748b;">' + UTILS.escapeHtml(it.stage_label) + '</div></div>' +
+                rightEl +
+              '</div>';
+            }).join("")
+          : '<div style="color:var(--text-muted);font-size:12px;">Chưa có hạng mục nào.</div>';
+
         return '<div class="crp-panel-card">' +
           '<div class="crp-panel-header">' +
             '<span><code>' + UTILS.escapeHtml(o.order_code) + '</code> — ' + UTILS.escapeHtml(o.customer_name) + '</span>' +
@@ -77,39 +115,13 @@
             '<div style="font-size:13px;font-weight:700;margin-bottom:4px;">' + UTILS.escapeHtml(o.title) + '</div>' +
             '<div style="font-size:12px;color:' + (o.is_late ? "#dc2626" : "#64748b") + ';margin-bottom:8px;">Hạn giao: ' + CARPENTRY_HELPER.formatDateVi(o.due_date) + ' • ' + UTILS.escapeHtml(o.current_stage_summary) + '</div>' +
             '<div class="crp-progress-bar"><div class="crp-progress-fill" style="width:' + (o.completion_pct || 0) + '%;"></div></div>' +
-            '<div id="prod-items-' + o.id + '" style="margin-top:10px;font-size:12.5px;color:var(--text-muted);">Đang tải chi tiết hạng mục...</div>' +
+            '<div id="prod-items-' + o.id + '" style="margin-top:10px;font-size:12.5px;">' + itemsHtml + '</div>' +
           '</div>' +
         '</div>';
       }).join("");
 
       var self = this;
-      orders.forEach(function(o) { self.loadOrderItemsInline(o.id); });
       APP.renderPagination("prod-pagination", pagination, function(p, ps) { self.pageSize = ps || 10; self.loadBoard(p); });
-    },
-
-    loadOrderItemsInline: function(oid) {
-      var self = this;
-      google.script.run
-        .withSuccessHandler(function(res) {
-          var box = document.getElementById("prod-items-" + oid);
-          if (!box || !res || !res.success || !res.data) return;
-          var items = res.data.items || [];
-          var stages = (CARPENTRY_HELPER.metaCache && CARPENTRY_HELPER.metaCache.policy && CARPENTRY_HELPER.metaCache.policy.productionStages) || [];
-          var canUpdate = APP.hasPermission("production.stage_update");
-
-          box.innerHTML = items.map(function(it) {
-            var curIdx = stages.findIndex(function(s) { return s.code === it.production_stage; });
-            var nextStage = (curIdx >= 0 && curIdx + 1 < stages.length) ? stages[curIdx + 1] : null;
-            var btn = (canUpdate && nextStage)
-              ? '<button type="button" class="btn btn-primary btn-sm" onclick="PRODUCTION_CLIENT.advanceStage(\'' + it.id + '\',\'' + nextStage.code + '\')">👉 ' + UTILS.escapeHtml(nextStage.name) + '</button>'
-              : '<span style="color:#059669;font-weight:700;">✅ Xong QC</span>';
-            return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed #e2e8f0;">' +
-              '<div><strong>' + UTILS.escapeHtml(it.item_name) + '</strong><div style="font-size:11.5px;color:#64748b;">' + UTILS.escapeHtml(it.stage_label) + '</div></div>' +
-              btn +
-            '</div>';
-          }).join("");
-        })
-        .apiGetFurnitureOrderDetail(AUTH.getToken(), oid);
     },
 
     advanceStage: function(itemId, nextStageCode) {
@@ -121,11 +133,15 @@
             APP.showToast(res.message || "Đã cập nhật công đoạn!", "success");
             self.loadBoard(self.page);
           } else {
-            APP.showToast((res && res.error) || "Lỗi cập nhật tiến độ.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Lỗi cập nhật tiến độ.", "error");
           }
+        })
+        .withFailureHandler(function(err) {
+          APP.stopPageLoading();
+          APP.showToast((err && err.message) || String(err), "error");
         })
         .apiUpdateItemProductionStage(AUTH.getToken(), { order_item_id: itemId, to_stage: nextStageCode });
     }
   };
-  APP.registerModule("production", PRODUCTION_CLIENT, "view-production");
+  APP.registerModule("production", PRODUCTION_CLIENT);
 </script>

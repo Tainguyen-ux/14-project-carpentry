@@ -102,9 +102,13 @@
       google.script.run
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
-          if (!res || !res.success || !res.data) return;
+          if (!res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Lỗi tải danh sách thanh toán.", "error");
+            return;
+          }
           self.renderList(res.data.items || [], res.data.pagination);
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiGetOrderPayments(AUTH.getToken(), { keyword: kw, status: st }, this.page, this.pageSize);
     },
 
@@ -189,9 +193,10 @@
             self.closeCollectModal();
             self.loadPayments(self.page);
           } else {
-            APP.showToast((res && res.error) || "Lỗi thu tiền.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Lỗi thu tiền.", "error");
           }
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiCollectOrderPayment(AUTH.getToken(), {
           payment_id: (document.getElementById("cp-payment-id") || {}).value || "",
           amount: Number((document.getElementById("cp-amount") || {}).value) || 0,
@@ -200,5 +205,5 @@
         });
     }
   };
-  APP.registerModule("payments", PAYMENTS_CLIENT, "view-payments");
+  APP.registerModule("payments", PAYMENTS_CLIENT);
 </script>

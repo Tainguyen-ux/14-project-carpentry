@@ -34,10 +34,64 @@ function parsePaymentSchedulePcts_(schedStr) {
   return parts;
 }
 
+function actorHasPerm_(actor, permCode) {
+  if (!actor) return false;
+  if (actor.is_admin || actor.isAdmin) return true;
+  var perms = actor.permissions || [];
+  if (perms.indexOf("*") !== -1) return true;
+  return perms.indexOf(permCode) !== -1;
+}
+
+function actorHasAnyPerm_(actor, permCodes) {
+  if (!actor) return false;
+  if (actor.is_admin || actor.isAdmin) return true;
+  var perms = actor.permissions || [];
+  if (perms.indexOf("*") !== -1) return true;
+  var list = Array.isArray(permCodes) ? permCodes : [permCodes];
+  for (var i = 0; i < list.length; i++) {
+    if (perms.indexOf(list[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function sanitizeOrderForActor_(enrichedOrder, actor) {
+  if (!enrichedOrder) return enrichedOrder;
+  var canViewFinancials = actorHasAnyPerm_(actor, [
+    "order.view_all", "quotation.create", "quotation.approve",
+    "order.approve", "payment.create", "debt.view"
+  ]);
+  var canViewProfit = actorHasPerm_(actor, "profit_report.view");
+  var canViewMatCost = canViewProfit || actorHasAnyPerm_(actor, ["material.issue", "material.estimate", "material.expense_create"]);
+
+  var out = Object.assign({}, enrichedOrder, {
+    can_view_financials: canViewFinancials,
+    can_view_profit: canViewProfit
+  });
+  if (!canViewFinancials) {
+    out.subtotal_amount = null;
+    out.discount_amount = null;
+    out.total_amount = null;
+    out.paid_amount = null;
+    out.debt_amount = null;
+  }
+  if (!canViewMatCost) {
+    out.material_cost_total = null;
+  }
+  if (!canViewProfit) {
+    out.labor_extra_cost = null;
+    out.gross_profit = null;
+    out.gross_margin_pct = null;
+  }
+  return out;
+}
+
 function getCarpentryPolicyConfig_(app) {
+  if (app && app._carpentryPolicyCache) {
+    return app._carpentryPolicyCache;
+  }
   var stagesRaw = app.Config.get("PRODUCTION_STAGES_JSON", "");
   var schedStr = String(app.Config.get("PAYMENT_INSTALLMENT_SCHEDULE", "40-40-20")).trim() || "40-40-20";
-  return {
+  var policy = {
     defaultPageSize: Number(app.Config.get("DEFAULT_PAGE_SIZE", 10)) || 10,
     upcomingDeliveryDays: Math.max(1, Number(app.Config.get("UPCOMING_DELIVERY_DAYS", 7)) || 7),
     urgentDelayAlertDays: Math.max(1, Number(app.Config.get("URGENT_DELAY_ALERT_DAYS", 3)) || 3),
@@ -50,14 +104,22 @@ function getCarpentryPolicyConfig_(app) {
     openingCashBalance: Number(app.Config.get("OPENING_CASH_BALANCE", 0)) || 0,
     driveRootFolderName: String(app.Config.get("CARPENTRY_DRIVE_FOLDER_NAME", "CARPENTRY_DRAWINGS_PHOTOS")).trim() || "CARPENTRY_DRAWINGS_PHOTOS"
   };
+  if (app) app._carpentryPolicyCache = policy;
+  return policy;
 }
 
 function getCarpentryTodayYmd_(app) {
-  return app.Utils.formatDate(new Date());
+  if (app && app._carpentryTodayYmd) return app._carpentryTodayYmd;
+  var ymd = app.Utils.formatDate(new Date());
+  if (app) app._carpentryTodayYmd = ymd;
+  return ymd;
 }
 
 function getCarpentryNowStr_(app) {
-  return app.Utils.formatDateTime(new Date());
+  if (app && app._carpentryNowStr) return app._carpentryNowStr;
+  var nowStr = app.Utils.formatDateTime(new Date());
+  if (app) app._carpentryNowStr = nowStr;
+  return nowStr;
 }
 
 function addCarpentryDaysYmd_(ymdStr, daysToAdd) {
@@ -208,8 +270,29 @@ function saveCarpentryFileToDrive_(app, base64Data, fileName, mimeType, subFolde
     throw new Error("DriveApp chưa khả dụng để lưu bản vẽ/ảnh.");
   }
   var rootName = policy.driveRootFolderName;
-  var rootIter = DriveApp.getFoldersByName(rootName);
-  var rootFolder = rootIter.hasNext() ? rootIter.next() : DriveApp.createFolder(rootName);
+  var rootFolder = null;
+  var cacheKey = "CRP_DRV_ROOT_" + rootName;
+  var cacheSvc = null;
+  try {
+    if (typeof CacheService !== "undefined" && CacheService && CacheService.getScriptCache) {
+      cacheSvc = CacheService.getScriptCache();
+      var cachedRootId = cacheSvc.get(cacheKey);
+      if (cachedRootId && typeof DriveApp.getFolderById === "function") {
+        rootFolder = DriveApp.getFolderById(cachedRootId);
+      }
+    }
+  } catch (eCache) {
+    rootFolder = null;
+  }
+  if (!rootFolder) {
+    var rootIter = DriveApp.getFoldersByName(rootName);
+    rootFolder = rootIter.hasNext() ? rootIter.next() : DriveApp.createFolder(rootName);
+    try {
+      if (cacheSvc && rootFolder && typeof rootFolder.getId === "function") {
+        cacheSvc.put(cacheKey, rootFolder.getId(), 21600);
+      }
+    } catch (ePut) {}
+  }
 
   var subName = String(subFolderName || "GENERAL").trim();
   var subIter = rootFolder.getFoldersByName(subName);

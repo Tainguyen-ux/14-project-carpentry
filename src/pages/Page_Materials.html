@@ -65,11 +65,11 @@
           <select id="mis-material-id" class="form-select" required></select>
         </div>
         <div class="form-row-2">
-          <div class="form-group">
+          <div class="form-group" id="mis-est-group">
             <label class="form-label" for="mis-est-qty">SL Dự trù</label>
             <input type="number" step="0.1" min="0" id="mis-est-qty" class="form-input" value="0">
           </div>
-          <div class="form-group">
+          <div class="form-group" id="mis-iss-group">
             <label class="form-label" for="mis-iss-qty">SL Xuất kho thực tế</label>
             <input type="number" step="0.1" min="0" id="mis-iss-qty" class="form-input" value="1">
           </div>
@@ -111,7 +111,10 @@
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
           var sel = document.getElementById("mat-order-select");
-          if (!sel || !res || !res.success || !res.data) return;
+          if (!sel || !res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Không tải được danh sách đơn hàng.", "error");
+            return;
+          }
           var list = res.data.items || [];
           sel.innerHTML = '<option value="">-- Chọn đơn hàng để xem vật tư &amp; giá vốn --</option>' +
             list.map(function(o) { return '<option value="' + o.id + '">' + UTILS.escapeHtml(o.order_code + " - " + o.customer_name) + '</option>'; }).join("");
@@ -121,6 +124,7 @@
             self.loadOrderMaterials(self.selectedOrderId);
           }
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiGetFurnitureOrders(AUTH.getToken(), {}, 1, 50);
     },
 
@@ -130,28 +134,37 @@
       this.selectedOrderId = oid;
       google.script.run
         .withSuccessHandler(function(res) {
-          if (!res || !res.success || !res.data) return;
+          if (!res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Không tải được vật tư đơn hàng.", "error");
+            return;
+          }
           var o = res.data.order;
           var mats = res.data.materials || [];
           var pBox = document.getElementById("mat-order-profit-box");
           if (pBox && o) {
-            var canSeeProfit = APP.hasPermission("profit_report.view");
-            pBox.innerHTML = '<div>Giá trị HĐ: <strong>' + UTILS.formatCurrency(o.total_amount) + '</strong> • Chi phí vật tư: <strong>' + UTILS.formatCurrency(o.material_cost_total) + '</strong></div>' +
+            var canSeeFin = o.can_view_financials !== false && o.total_amount !== null;
+            var canSeeProfit = APP.hasPermission("profit_report.view") && o.gross_profit !== null;
+            var matCostStr = o.material_cost_total !== null ? UTILS.formatCurrency(o.material_cost_total) : "—";
+            pBox.innerHTML = '<div>' +
+              (canSeeFin ? ('Giá trị HĐ: <strong>' + UTILS.formatCurrency(o.total_amount) + '</strong> • ') : '') +
+              'Chi phí vật tư: <strong>' + matCostStr + '</strong></div>' +
               (canSeeProfit ? '<div style="margin-top:4px;color:#059669;font-weight:700;">Lợi nhuận gộp tạm tính: ' + UTILS.formatCurrency(o.gross_profit) + ' (' + o.gross_margin_pct + '%)</div>' : '');
           }
           var lBox = document.getElementById("mat-order-lines");
           if (lBox) {
             lBox.innerHTML = mats.length
               ? mats.map(function(m) {
+                  var costHtml = m.total_cost !== null ? ('<strong>' + UTILS.formatCurrency(m.total_cost) + '</strong>') : '<span style="color:var(--text-muted);">—</span>';
                   return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:12.5px;">' +
                     '<div><strong>' + UTILS.escapeHtml(m.material_name) + '</strong><div style="font-size:11.5px;color:#64748b;">Dự trù: ' + m.estimated_qty + ' ' + UTILS.escapeHtml(m.unit) + ' • Xuất thực tế: <strong>' + m.issued_qty + '</strong></div></div>' +
-                    '<strong>' + UTILS.formatCurrency(m.total_cost) + '</strong>' +
+                    costHtml +
                   '</div>';
                 }).join("")
               : '<div style="color:var(--text-muted);font-size:13px;">Chưa có vật tư nào xuất cho đơn này.</div>';
           }
         })
-        .apiGetFurnitureOrderDetail(AUTH.getToken(), oid);
+        .withFailureHandler(function(err) { APP.showToast((err && err.message) || String(err), "error"); })
+        .apiGetFurnitureOrderDetail(AUTH.getToken(), oid, { sections: ["materials"] });
     },
 
     loadInventory: function(page) {
@@ -162,25 +175,39 @@
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
           var tbody = document.getElementById("mat-stock-tbody");
-          if (!tbody || !res || !res.success || !res.data) return;
+          if (!tbody || !res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Không tải được tồn kho vật tư.", "error");
+            return;
+          }
           var list = res.data.items || [];
           tbody.innerHTML = list.map(function(m) {
             var badge = m.is_low_stock
               ? '<span class="crp-badge" style="background:#fef2f2;color:#dc2626;">⚠ Còn ' + m.stock_qty + ' ' + UTILS.escapeHtml(m.unit) + '</span>'
               : '<span style="font-weight:700;color:#059669;">' + m.stock_qty + ' ' + UTILS.escapeHtml(m.unit) + '</span>';
+            var costTxt = m.default_cost_price !== null ? (UTILS.formatCurrency(m.default_cost_price) + ' / ' + UTILS.escapeHtml(m.unit)) : UTILS.escapeHtml(m.unit);
             return '<tr>' +
               '<td><code>' + UTILS.escapeHtml(m.material_code) + '</code> <strong>' + UTILS.escapeHtml(m.item_name) + '</strong><div style="font-size:11.5px;color:#64748b;">' + UTILS.escapeHtml(m.spec_material || "") + '</div></td>' +
-              '<td>' + UTILS.formatCurrency(m.default_cost_price) + ' / ' + UTILS.escapeHtml(m.unit) + '</td>' +
+              '<td>' + costTxt + '</td>' +
               '<td>' + badge + '</td>' +
             '</tr>';
           }).join("");
           APP.renderPagination("mat-stock-pagination", res.data.pagination, function(p, ps) { self.invPageSize = ps || 10; self.loadInventory(p); });
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiGetMaterialCatalog(AUTH.getToken(), { catalog_kind: "RAW_MATERIAL", low_stock: low }, this.invPage, this.invPageSize);
     },
 
     openIssueModal: function() {
       if (!this.selectedOrderId) { APP.showToast("Vui lòng chọn đơn hàng trước.", "warning"); return; }
+      var canIssue = APP.hasPermission("material.issue");
+      var canEst = APP.hasPermission("material.estimate");
+      var issGrp = document.getElementById("mis-iss-group");
+      var issInp = document.getElementById("mis-iss-qty");
+      var estInp = document.getElementById("mis-est-qty");
+      if (issGrp) issGrp.style.display = canIssue ? "" : "none";
+      if (issInp) issInp.value = canIssue ? 1 : 0;
+      if (estInp && !canIssue && canEst) estInp.value = 1;
+
       CARPENTRY_HELPER.loadMeta(function(meta) {
         var sel = document.getElementById("mis-material-id");
         if (sel && meta && meta.catalog) {
@@ -191,7 +218,7 @@
         }
         var m = document.getElementById("modal-mat-issue");
         if (m) m.classList.add("open");
-      }, true);
+      });
     },
 
     closeIssueModal: function() {
@@ -202,26 +229,29 @@
     submitIssue: function(e) {
       e.preventDefault();
       var self = this;
+      var canIssue = APP.hasPermission("material.issue");
       google.script.run
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
           if (res && res.success) {
             APP.showToast(res.message || "Đã lưu vật tư công trình!", "success");
+            CARPENTRY_HELPER.invalidateMeta();
             self.closeIssueModal();
             self.loadOrderMaterials(self.selectedOrderId);
             self.loadInventory(self.invPage);
           } else {
-            APP.showToast((res && res.error) || "Không thể xuất vật tư.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Không thể xuất vật tư.", "error");
           }
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiEstimateOrIssueMaterial(AUTH.getToken(), {
           order_id: this.selectedOrderId,
           material_id: (document.getElementById("mis-material-id") || {}).value || "",
           estimated_qty: Number((document.getElementById("mis-est-qty") || {}).value) || 0,
-          issued_qty: Number((document.getElementById("mis-iss-qty") || {}).value) || 0,
+          issued_qty: canIssue ? (Number((document.getElementById("mis-iss-qty") || {}).value) || 0) : 0,
           notes: (document.getElementById("mis-notes") || {}).value || ""
         });
     }
   };
-  APP.registerModule("materials", MATERIALS_CLIENT, "view-materials");
+  APP.registerModule("materials", MATERIALS_CLIENT);
 </script>

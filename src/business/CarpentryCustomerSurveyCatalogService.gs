@@ -6,41 +6,68 @@
  * - Danh mục Hạng mục Báo giá mẫu (md/m2/cái) & Kho Ván gỗ / Phụ kiện (`apiGetMaterialCatalog`, `apiSaveMaterialCatalog`)
  */
 
-function apiGetCarpentryMeta(token) {
+function apiGetCarpentryMeta(token, options) {
   var app = getCore_(token);
   try {
-    app.Authorization.requireAny([
-      "customer.view", "survey.create", "quotation.create", "order.view",
-      "order.view_all", "production.stage_update", "material.issue",
-      "payment.create", "delivery.update", "menu.surveys", "menu.orders"
+    var actor = app.Authorization.requireAny([
+      "customer.view", "customer.manage", "survey.create", "quotation.create", "order.view",
+      "order.view_all", "drawing.view", "drawing.upload", "photo.upload",
+      "production.stage_update", "package.qr_print", "material.estimate", "material.issue",
+      "material.expense_create", "payment.create", "debt.view", "delivery.update",
+      "acceptance.sign", "warranty.manage", "cash.view", "report.view", "profit_report.view",
+      "menu.surveys", "menu.orders", "menu.drawings", "menu.production",
+      "menu.materials", "menu.payments", "menu.install_warranty", "menu.customers", "menu.reports_cash"
     ]);
+    options = options || {};
+    var reqSections = Array.isArray(options.sections) && options.sections.length > 0 ? options.sections : null;
+    var want = function(name) { return !reqSections || reqSections.indexOf(name) !== -1; };
+
     var policy = getCarpentryPolicyConfig_(app);
-    var customers = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME)
-      .filter(function(c) { return c && c.id && c.status !== "INACTIVE"; })
-      .map(function(c) {
-        return {
-          id: c.id,
-          customer_code: c.customer_code,
-          full_name: c.full_name,
-          phone: formatCarpentryPhone_(c.phone),
-          site_address: c.site_address,
-          project_type: c.project_type,
-          partner_name: c.partner_name
-        };
-      });
-    var catalog = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.MATERIAL_CATALOG.NAME)
-      .filter(function(m) { return m && m.id && m.status !== "INACTIVE"; })
-      .map(function(m) {
-        return Object.assign({}, m, {
-          default_cost_price: Number(m.default_cost_price) || 0,
-          default_sell_price: Number(m.default_sell_price) || 0,
-          stock_qty: Number(m.stock_qty) || 0,
-          min_stock_qty: Number(m.min_stock_qty) || policy.lowStockThresholdDefault
-        });
-      });
-    var staffList = app.Data.getAll("USERS")
-      .filter(function(u) { return u && u.id && u.status !== "LOCKED"; })
-      .map(function(u) { return { id: u.id, username: u.username, full_name: u.full_name || u.username }; });
+    var canReadCustomers = actorHasAnyPerm_(actor, [
+      "customer.view", "customer.manage", "survey.create", "quotation.create",
+      "order.view", "order.view_all", "menu.customers", "menu.surveys", "menu.orders"
+    ]);
+    var canReadCatalog = actorHasAnyPerm_(actor, [
+      "quotation.create", "material.estimate", "material.issue", "material.expense_create",
+      "order.approve", "menu.materials", "menu.reports_cash", "menu.orders"
+    ]);
+    var canSeeCost = actorHasAnyPerm_(actor, ["profit_report.view", "material.expense_create", "order.approve", "material.issue"]);
+    var canReadStaff = actorHasAnyPerm_(actor, ["order.approve", "quotation.approve", "warranty.manage", "delivery.update", "users.view"]);
+
+    var customers = (want("customers") && canReadCustomers)
+      ? app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME)
+          .filter(function(c) { return c && c.id && c.status !== "INACTIVE"; })
+          .map(function(c) {
+            return {
+              id: c.id,
+              customer_code: c.customer_code,
+              full_name: c.full_name,
+              phone: formatCarpentryPhone_(c.phone),
+              site_address: c.site_address,
+              project_type: c.project_type,
+              partner_name: c.partner_name
+            };
+          })
+      : [];
+
+    var catalog = (want("catalog") && canReadCatalog)
+      ? app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.MATERIAL_CATALOG.NAME)
+          .filter(function(m) { return m && m.id && m.status !== "INACTIVE"; })
+          .map(function(m) {
+            return Object.assign({}, m, {
+              default_cost_price: canSeeCost ? (Number(m.default_cost_price) || 0) : null,
+              default_sell_price: Number(m.default_sell_price) || 0,
+              stock_qty: Number(m.stock_qty) || 0,
+              min_stock_qty: Number(m.min_stock_qty) || policy.lowStockThresholdDefault
+            });
+          })
+      : [];
+
+    var staffList = (want("staff_list") && canReadStaff)
+      ? app.Data.getAll("USERS")
+          .filter(function(u) { return u && u.id && u.status !== "LOCKED"; })
+          .map(function(u) { return { id: u.id, username: u.username, full_name: u.full_name || u.username }; })
+      : [];
 
     return toRpcJson_(app.Utils.buildResponse(true, {
       today: getCarpentryTodayYmd_(app),
@@ -167,7 +194,7 @@ function apiSaveCustomer(token, dto) {
 function apiGetCustomerDetail(token, idOrCode) {
   var app = getCore_(token);
   try {
-    app.Authorization.requireAny(["customer.view", "order.view", "order.view_all", "debt.view"]);
+    var actor = app.Authorization.requireAny(["customer.view", "order.view", "order.view_all", "debt.view"]);
     var key = String(idOrCode || "").trim();
     var policy = getCarpentryPolicyConfig_(app);
     var todayYmd = getCarpentryTodayYmd_(app);
@@ -179,7 +206,7 @@ function apiGetCustomerDetail(token, idOrCode) {
 
     var orders = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME, function(o) {
       return String(o.customer_id) === String(cust.id);
-    }).map(function(o) { return enrichFurnitureOrderRow_(o, todayYmd, policy); }).reverse();
+    }).map(function(o) { return sanitizeOrderForActor_(enrichFurnitureOrderRow_(o, todayYmd, policy), actor); }).reverse();
 
     var surveys = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.CARPENTRY_SURVEYS.NAME, function(s) {
       return String(s.customer_id) === String(cust.id);
@@ -306,10 +333,11 @@ function apiSaveSurvey(token, dto) {
 function apiGetMaterialCatalog(token, filters, page, pageSize) {
   var app = getCore_(token);
   try {
-    app.Authorization.requireAny([
+    var actor = app.Authorization.requireAny([
       "quotation.create", "material.estimate", "material.issue",
       "material.expense_create", "order.approve", "menu.materials", "menu.reports_cash"
     ]);
+    var canSeeCost = actorHasAnyPerm_(actor, ["profit_report.view", "material.expense_create", "order.approve", "material.issue"]);
     filters = filters || {};
     var policy = getCarpentryPolicyConfig_(app);
     var kind = String(filters.catalog_kind || "").trim().toUpperCase();
@@ -334,7 +362,7 @@ function apiGetMaterialCatalog(token, filters, page, pageSize) {
         if (!hit) continue;
       }
       out.push(Object.assign({}, m, {
-        default_cost_price: Number(m.default_cost_price) || 0,
+        default_cost_price: canSeeCost ? (Number(m.default_cost_price) || 0) : null,
         default_sell_price: Number(m.default_sell_price) || 0,
         stock_qty: qty,
         min_stock_qty: minQ,

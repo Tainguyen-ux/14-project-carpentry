@@ -8,9 +8,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title><?= appName ?></title>
   <script>window.APP_CODE = "<?= appCode ?>";</script>
-  <?!= include('Css'); ?>
+  <?!= include('ui/Css'); ?>
   <!-- Nhúng Framework điều phối client APP, AUTH, UTILS trước toàn bộ trang nghiệp vụ -->
-  <?!= include('Js_App'); ?>
+  <?!= include('ui/Js_App'); ?>
 </head>
 <body>
 
@@ -350,7 +350,7 @@
               <button type="button" id="btn-dash-new-order" class="btn-crp-glass" onclick="APP.navigateTo('orders')">
                 📋 Lập Báo giá / Đơn
               </button>
-              <button type="button" class="btn-crp-glass" onclick="CARPENTRY_HELPER.openQrScanModal()">
+              <button type="button" id="btn-dash-quick-qr" class="btn-crp-glass" onclick="CARPENTRY_HELPER.openQrScanModal()">
                 📷 Quét QR Kiện hàng
               </button>
             </div>
@@ -388,28 +388,28 @@
           </div>
 
           <div class="crp-kpi-grid">
-            <div class="crp-kpi-card" onclick="APP.navigateTo('orders')">
+            <div class="crp-kpi-card" id="dash-card-value" onclick="APP.navigateTo('orders')">
               <div class="crp-kpi-icon" style="background:#f0fdf4;color:#15803d;">💰</div>
               <div>
                 <span class="crp-kpi-label">Giá trị đơn đang làm</span>
                 <span class="crp-kpi-val" id="dash-kpi-value" style="color:#15803d;">0 ₫</span>
               </div>
             </div>
-            <div class="crp-kpi-card" onclick="APP.navigateTo('payments')">
+            <div class="crp-kpi-card" id="dash-card-debt" onclick="APP.navigateTo('payments')">
               <div class="crp-kpi-icon" style="background:#fff7ed;color:#c2410c;">💵</div>
               <div>
                 <span class="crp-kpi-label">Công nợ HĐ cần thu</span>
                 <span class="crp-kpi-val" id="dash-kpi-debt" style="color:#c2410c;">0 ₫</span>
               </div>
             </div>
-            <div class="crp-kpi-card" onclick="APP.navigateTo('drawings')">
+            <div class="crp-kpi-card" id="dash-card-drawing" onclick="APP.navigateTo('drawings')">
               <div class="crp-kpi-icon" style="background:#eff6ff;color:#1d4ed8;">📐</div>
               <div>
                 <span class="crp-kpi-label">Chờ duyệt bản vẽ SX</span>
                 <span class="crp-kpi-val" id="dash-kpi-drawing">0 đơn</span>
               </div>
             </div>
-            <div class="crp-kpi-card" onclick="APP.navigateTo('materials')">
+            <div class="crp-kpi-card" id="dash-card-lowstock" onclick="APP.navigateTo('materials')">
               <div class="crp-kpi-icon" style="background:#fef2f2;color:#b91c1c;">🪵</div>
               <div>
                 <span class="crp-kpi-label">Ván &amp; Phụ kiện sắp hết</span>
@@ -429,7 +429,7 @@
               </div>
             </div>
 
-            <div class="crp-panel-card">
+            <div class="crp-panel-card" id="dash-panel-due-payments">
               <div class="crp-panel-header">
                 <span>💵 Đợt Thanh Toán Đến Hạn Thu (Đợt 1-2-3)</span>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="APP.navigateTo('payments')">Thu tiền</button>
@@ -1113,15 +1113,15 @@
         </div>
 
         <!-- NHÚNG 9 MÀN HÌNH NGHIỆP VỤ XƯỞNG MỘC & NỘI THẤT (Tách riêng tại src/pages/) -->
-        <?!= include('Page_Surveys'); ?>
-        <?!= include('Page_Orders'); ?>
-        <?!= include('Page_Drawings'); ?>
-        <?!= include('Page_Production'); ?>
-        <?!= include('Page_Materials'); ?>
-        <?!= include('Page_Payments'); ?>
-        <?!= include('Page_InstallWarranty'); ?>
-        <?!= include('Page_Customers'); ?>
-        <?!= include('Page_ReportsCash'); ?>
+        <?!= include('pages/Page_Surveys'); ?>
+        <?!= include('pages/Page_Orders'); ?>
+        <?!= include('pages/Page_Drawings'); ?>
+        <?!= include('pages/Page_Production'); ?>
+        <?!= include('pages/Page_Materials'); ?>
+        <?!= include('pages/Page_Payments'); ?>
+        <?!= include('pages/Page_InstallWarranty'); ?>
+        <?!= include('pages/Page_Customers'); ?>
+        <?!= include('pages/Page_ReportsCash'); ?>
 
       </main>
     </div>
@@ -1132,15 +1132,15 @@
         <span>🏠</span>
         <span>Tổng quan</span>
       </button>
-      <button type="button" class="crp-bottom-btn" data-target="production" onclick="APP.navigateTo('production')">
+      <button type="button" id="mob-nav-production" class="crp-bottom-btn" data-target="production" onclick="APP.navigateTo('production')">
         <span>🏭</span>
         <span>Xưởng</span>
       </button>
-      <button type="button" class="crp-bottom-btn" onclick="CARPENTRY_HELPER.openQuickSurvey()" aria-label="Đo đạc">
+      <button type="button" id="mob-nav-survey" class="crp-bottom-btn" onclick="CARPENTRY_HELPER.openQuickSurvey()" aria-label="Đo đạc">
         <span class="crp-bottom-fab">📐</span>
         <span style="color:#92400e;font-weight:700;">Đo đạc</span>
       </button>
-      <button type="button" class="crp-bottom-btn" onclick="CARPENTRY_HELPER.openQrScanModal()">
+      <button type="button" id="mob-nav-qr" class="crp-bottom-btn" onclick="CARPENTRY_HELPER.openQrScanModal()">
         <span>📷</span>
         <span>Quét QR</span>
       </button>
@@ -1847,12 +1847,12 @@
   </div>
 
   <!-- Include App, Auth, Users, Roles, Menus, Settings & Audit Client Scripts -->
-  <?!= include('Js_Auth'); ?>
-  <?!= include('Js_Users'); ?>
-  <?!= include('Js_Roles'); ?>
-  <?!= include('Js_Menus'); ?>
-  <?!= include('Js_Settings'); ?>
-  <?!= include('Js_Audit'); ?>
+  <?!= include('ui/Js_Auth'); ?>
+  <?!= include('ui/Js_Users'); ?>
+  <?!= include('ui/Js_Roles'); ?>
+  <?!= include('ui/Js_Menus'); ?>
+  <?!= include('ui/Js_Settings'); ?>
+  <?!= include('ui/Js_Audit'); ?>
 
 </body>
 </html>

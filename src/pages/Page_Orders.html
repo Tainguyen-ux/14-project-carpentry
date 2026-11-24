@@ -124,8 +124,8 @@
     onInit: function() {
       var btnCreate = document.getElementById("btn-order-create");
       if (btnCreate) btnCreate.style.display = APP.hasPermission("quotation.create") ? "" : "none";
-      var self = this;
-      CARPENTRY_HELPER.loadMeta(function() { self.loadOrders(1); });
+      CARPENTRY_HELPER.loadMeta();
+      this.loadOrders(1);
     },
 
     onReload: function() { this.loadOrders(this.page); },
@@ -139,7 +139,7 @@
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
           if (!res || !res.success || !res.data) {
-            APP.showToast((res && res.error) || "Lỗi tải danh sách đơn hàng.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Lỗi tải danh sách đơn hàng.", "error");
             return;
           }
           self.renderList(res.data.items || [], res.data.pagination);
@@ -161,21 +161,34 @@
       }
       if (empty) empty.style.display = "none";
 
-      var canApprove = APP.hasPermission("quotation.approve") || APP.hasPermission("order.approve");
+      var canStartProd = APP.hasPermission("order.approve");
+      var canApproveDraw = APP.hasPermission("quotation.approve");
+      var canViewDraw = APP.hasPermission("drawing.view") || APP.hasPermission("drawing.upload") || APP.hasPermission("photo.upload");
+
       if (tbody) {
         tbody.innerHTML = items.map(function(o) {
-          var appBtn = (canApprove && (o.status === "QUOTED" || o.status === "DEPOSITED" || o.drawing_status !== "APPROVED"))
-            ? '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\')">Duyệt SX</button>'
+          var appBtn = "";
+          if (canStartProd && (o.status === "QUOTED" || o.status === "DEPOSITED" || o.drawing_status !== "APPROVED")) {
+            appBtn = '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\',\'START_PRODUCTION\')">Duyệt SX</button>';
+          } else if (canApproveDraw && o.drawing_status !== "APPROVED") {
+            appBtn = '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\',\'APPROVE_DRAWING_ONLY\')">Duyệt BV</button>';
+          }
+          var drawBtn = canViewDraw
+            ? '<button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.openDrawings(\'' + o.id + '\')">Bản vẽ</button>'
             : '';
-          var drawBtn = '<button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.openDrawings(\'' + o.id + '\')">Bản vẽ</button>';
           var drwTag = o.drawing_status === "APPROVED"
             ? '<span style="font-size:11px;color:#059669;font-weight:700;">✔ Bản vẽ duyệt</span>'
             : '<span style="font-size:11px;color:#d97706;">⚠ Chờ duyệt BV</span>';
+          var showFin = o.can_view_financials !== false && o.total_amount !== null;
+          var totalCell = showFin ? ('<strong>' + UTILS.formatCurrency(o.total_amount) + '</strong>') : '<span style="color:var(--text-muted);">—</span>';
+          var payCell = showFin
+            ? ('<div style="color:#059669;font-size:12.5px;">Thu: ' + UTILS.formatCurrency(o.paid_amount) + '</div><div style="color:#dc2626;font-size:12px;">Nợ: ' + UTILS.formatCurrency(o.debt_amount) + '</div>')
+            : '<span style="color:var(--text-muted);">—</span>';
           return '<tr>' +
             '<td><code>' + UTILS.escapeHtml(o.order_code) + '</code><div style="font-size:11.5px;color:' + (o.is_late ? "#dc2626" : "var(--text-muted)") + ';">Giao: ' + CARPENTRY_HELPER.formatDateVi(o.due_date) + '</div></td>' +
             '<td><strong>' + UTILS.escapeHtml(o.customer_name) + '</strong><div style="font-size:12px;color:var(--text-muted);">' + UTILS.escapeHtml(o.title) + '</div></td>' +
-            '<td><strong>' + UTILS.formatCurrency(o.total_amount) + '</strong></td>' +
-            '<td><div style="color:#059669;font-size:12.5px;">Thu: ' + UTILS.formatCurrency(o.paid_amount) + '</div><div style="color:#dc2626;font-size:12px;">Nợ: ' + UTILS.formatCurrency(o.debt_amount) + '</div></td>' +
+            '<td>' + totalCell + '</td>' +
+            '<td>' + payCell + '</td>' +
             '<td style="min-width:110px;"><div style="font-size:12px;font-weight:700;">' + (o.completion_pct || 0) + '%</div><div class="crp-progress-bar"><div class="crp-progress-fill" style="width:' + (o.completion_pct || 0) + '%;"></div></div></td>' +
             '<td>' + CARPENTRY_HELPER.renderStatusBadge(o.status, o.status_label, o.status_emoji, o.status_color, o.status_bg) + '<div style="margin-top:3px;">' + drwTag + '</div></td>' +
             '<td style="text-align:right;white-space:nowrap;">' + appBtn + ' ' + drawBtn + '</td>' +
@@ -184,15 +197,25 @@
       }
       if (mob) {
         mob.innerHTML = items.map(function(o) {
-          var appBtn = (canApprove && (o.status === "QUOTED" || o.status === "DEPOSITED" || o.drawing_status !== "APPROVED"))
-            ? '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\')">Duyệt SX</button>'
+          var appBtn = "";
+          if (canStartProd && (o.status === "QUOTED" || o.status === "DEPOSITED" || o.drawing_status !== "APPROVED")) {
+            appBtn = '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\',\'START_PRODUCTION\')">Duyệt SX</button>';
+          } else if (canApproveDraw && o.drawing_status !== "APPROVED") {
+            appBtn = '<button type="button" class="btn btn-primary btn-sm" onclick="ORDERS_CLIENT.approveOrder(\'' + o.id + '\',\'APPROVE_DRAWING_ONLY\')">Duyệt BV</button>';
+          }
+          var drawBtn = canViewDraw
+            ? '<button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.openDrawings(\'' + o.id + '\')">Hồ sơ &amp; Bản vẽ</button>'
+            : '';
+          var showFin = o.can_view_financials !== false && o.total_amount !== null;
+          var finLine = showFin
+            ? '<div style="font-size:12.5px;margin:4px 0;">HĐ: <strong>' + UTILS.formatCurrency(o.total_amount) + '</strong> • Nợ: <strong style="color:#dc2626;">' + UTILS.formatCurrency(o.debt_amount) + '</strong></div>'
             : '';
           return '<div class="crp-mobile-card">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;"><code>' + UTILS.escapeHtml(o.order_code) + '</code>' + CARPENTRY_HELPER.renderStatusBadge(o.status, o.status_label, o.status_emoji, o.status_color, o.status_bg) + '</div>' +
             '<div style="font-weight:700;margin-top:4px;">' + UTILS.escapeHtml(o.customer_name) + ' — ' + UTILS.escapeHtml(o.title) + '</div>' +
-            '<div style="font-size:12.5px;margin:4px 0;">HĐ: <strong>' + UTILS.formatCurrency(o.total_amount) + '</strong> • Nợ: <strong style="color:#dc2626;">' + UTILS.formatCurrency(o.debt_amount) + '</strong></div>' +
+            finLine +
             '<div class="crp-progress-bar"><div class="crp-progress-fill" style="width:' + (o.completion_pct || 0) + '%;"></div></div>' +
-            '<div style="display:flex;gap:8px;margin-top:8px;">' + appBtn + '<button type="button" class="btn btn-secondary btn-sm" onclick="ORDERS_CLIENT.openDrawings(\'' + o.id + '\')">Hồ sơ &amp; Bản vẽ</button></div>' +
+            '<div style="display:flex;gap:8px;margin-top:8px;">' + appBtn + drawBtn + '</div>' +
           '</div>';
         }).join("");
       }
@@ -225,7 +248,7 @@
         self.renderItemRows();
         var modal = document.getElementById("modal-order-form");
         if (modal) modal.classList.add("open");
-      }, true);
+      });
     },
 
     openCreateFromSurvey: function(srv) { this.openCreateModal(srv); },
@@ -318,14 +341,14 @@
             self.closeCreateModal();
             self.loadOrders(1);
           } else {
-            APP.showToast((res && res.error) || "Lỗi tạo đơn hàng.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Lỗi tạo đơn hàng.", "error");
           }
         })
         .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast(err.message || String(err), "error"); })
         .apiSaveQuotationOrder(AUTH.getToken(), payload);
     },
 
-    approveOrder: function(orderId) {
+    approveOrder: function(orderId, actionMode) {
       var self = this;
       google.script.run
         .withSuccessHandler(function(res) {
@@ -334,10 +357,11 @@
             APP.showToast(res.message || "Đã duyệt bản vẽ & ra lệnh sản xuất!", "success");
             self.loadOrders(self.page);
           } else {
-            APP.showToast((res && res.error) || "Không thể duyệt đơn.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Không thể duyệt đơn.", "error");
           }
         })
-        .apiApproveQuotationAndStartOrder(AUTH.getToken(), { order_id: orderId, action: "START_PRODUCTION" });
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
+        .apiApproveQuotationAndStartOrder(AUTH.getToken(), { order_id: orderId, action: actionMode || "START_PRODUCTION" });
     },
 
     openDrawings: function(orderId) {
@@ -349,5 +373,5 @@
       }, 150);
     }
   };
-  APP.registerModule("orders", ORDERS_CLIENT, "view-orders");
+  APP.registerModule("orders", ORDERS_CLIENT);
 </script>

@@ -121,7 +121,8 @@
           });
         });
       }
-      CARPENTRY_HELPER.loadMeta(function() { self.loadSurveys(1); });
+      CARPENTRY_HELPER.loadMeta();
+      this.loadSurveys(1);
     },
 
     onReload: function() { this.loadSurveys(this.page); },
@@ -135,7 +136,7 @@
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
           if (!res || !res.success || !res.data) {
-            APP.showToast((res && res.error) || "Lỗi tải danh sách khảo sát.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Lỗi tải danh sách khảo sát.", "error");
             return;
           }
           self.itemsCache = res.data.items || [];
@@ -216,7 +217,7 @@
         if (dInp && meta) dInp.value = meta.today || "";
         var m = document.getElementById("modal-survey-form");
         if (m) m.classList.add("open");
-      }, true);
+      });
     },
 
     closeModal: function() {
@@ -247,7 +248,7 @@
             self.closeModal();
             self.loadSurveys(1);
           } else {
-            APP.showToast((res && res.error) || "Không thể lưu khảo sát.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Không thể lưu khảo sát.", "error");
           }
         })
         .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast(err.message || String(err), "error"); })
@@ -264,5 +265,5 @@
       }, 150);
     }
   };
-  APP.registerModule("surveys", SURVEYS_CLIENT, "view-surveys");
+  APP.registerModule("surveys", SURVEYS_CLIENT);
 </script>

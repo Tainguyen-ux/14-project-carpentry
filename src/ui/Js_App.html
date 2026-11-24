@@ -284,6 +284,18 @@ bindSidebarEvents: function() {
     },
 
     /**
+     * Bật / Tắt Sidebar Drawer (Mobile)
+     */
+    toggleSidebar: function() {
+      var sidebar = document.getElementById("app-sidebar");
+      if (sidebar && sidebar.classList.contains("open")) {
+        this.closeSidebar();
+      } else {
+        this.openSidebar();
+      }
+    },
+
+    /**
      * Điều hướng đến một module cụ thể bằng mã code
      * @param {string} moduleCode 
      */
@@ -320,34 +332,21 @@ bindSidebarEvents: function() {
       var descEl = document.getElementById("page-loader-desc");
 
       var descMap = {
-        "dashboard": "Đang tổng hợp số liệu thống kê thời gian thực...",
+        "dashboard": "Đang tổng hợp số liệu vận hành xưởng mộc thời gian thực...",
+        "surveys": "Đang tải danh sách phiếu khảo sát & đo đạc công trình...",
+        "orders": "Đang tải danh sách báo giá & đơn hàng sản xuất...",
+        "drawings": "Đang tải thư viện bản vẽ 2D/3D Drive & tem QR kiện hàng...",
+        "production": "Đang tải bảng tiến độ xưởng (CNC → Sơn PU → QC)...",
+        "materials": "Đang tải định mức vật tư, xuất kho & tồn kho ván gỗ...",
+        "payments": "Đang tải lịch thanh toán Đợt 1-2-3 và công nợ hợp đồng...",
+        "install-warranty": "Đang tải danh sách lắp đặt, nghiệm thu & phiếu bảo hành...",
+        "customers": "Đang tải danh sách chủ đầu tư, công trình & đối tác KTS...",
+        "reports-cash": "Đang tải báo cáo lãi/lỗ công trình, sổ quỹ & danh mục vật tư...",
         "users": "Đang tải danh sách tài khoản người dùng...",
         "roles": "Đang tải danh sách vai trò và phân quyền...",
         "menus": "Đang tải cấu trúc danh mục menu...",
         "audit-log": "Đang tải nhật ký hệ thống...",
-        "settings": "Đang tải cấu hình tham số hệ thống...",
-        "customers": "Đang tải danh sách khách hàng và lịch sử công nợ...",
-        "leads": "Đang tải danh sách khách hàng tiềm năng & phễu Lead...",
-        "opportunities": "Đang tải danh sách cơ hội bán hàng & báo giá...",
-        "interactions": "Đang tải timeline lịch sử chăm sóc khách hàng...",
-        "tasks": "Đang tải danh sách công việc và lịch nhắc hẹn hôm nay...",
-        "orders": "Đang tải danh sách đơn hàng và trạng thái mới nhất...",
-        "create_order": "Đang tải biểu mẫu tạo đơn hàng mới...",
-        "products": "Đang kiểm tra tồn kho và bảng giá sản phẩm...",
-        "deliveries": "Đang tải danh sách phiếu giao và trạng thái vận chuyển...",
-        "payments": "Đang tải lịch sử thu tiền và theo dõi công nợ...",
-        "assets": "Đang tải danh bạ trang thiết bị & tài sản doanh nghiệp...",
-        "assignments": "Đang tải danh sách biên bản bàn giao tài sản...",
-        "transfers": "Đang tải danh sách phiếu điều chuyển thiết bị...",
-        "maintenance": "Đang tải lịch sử bảo trì và phiếu báo hỏng thiết bị...",
-        "repairs": "Đang tải danh sách phiếu sửa chữa và tiến độ kỹ thuật...",
-        "reception": "Đang khởi tạo biểu mẫu tiếp nhận máy tại quầy...",
-        "history": "Đang tra cứu lịch sử sửa chữa và tình trạng bảo hành...",
-        "trips": "Đang tải danh sách hồ sơ các chuyến công tác...",
-        "request": "Đang khởi tạo phiếu đề nghị công tác mới...",
-        "approvals": "Đang tải danh sách hồ sơ chờ phê duyệt & giải ngân tạm ứng...",
-        "settlements": "Đang tải bảng kê thanh quyết toán chi phí công tác...",
-        "reports": "Đang tổng hợp biểu đồ phân tích và báo cáo chi tiết..."
+        "settings": "Đang tải cấu hình tham số hệ thống..."
       };
 
       if (titleEl) {
@@ -469,84 +468,14 @@ handleNavClick: function(itemEl) {
       var registeredMod = this.modules[module];
       var targetViewEl = document.getElementById((registeredMod && registeredMod.viewId) || ("view-" + module));
 
-            if (registeredMod && targetViewEl) {
+      if (registeredMod && targetViewEl) {
         targetViewEl.style.display = "block";
         if (typeof registeredMod.onInit === "function") {
           registeredMod.onInit();
         }
-      } else if (module === "orders" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof ORDERS_CLIENT !== "undefined" && ORDERS_CLIENT.init) ORDERS_CLIENT.init();
-      } else if (module === "customers" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof CUSTOMERS_CLIENT !== "undefined" && CUSTOMERS_CLIENT.init) CUSTOMERS_CLIENT.init();
-        else if (typeof CUSTOMER_CLIENT !== "undefined" && CUSTOMER_CLIENT.init) CUSTOMER_CLIENT.init();
-      } else if (module === "products" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof PRODUCTS_CLIENT !== "undefined" && PRODUCTS_CLIENT.init) PRODUCTS_CLIENT.init();
-      } else if (module === "deliveries" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof DELIVERIES_CLIENT !== "undefined" && DELIVERIES_CLIENT.init) DELIVERIES_CLIENT.init();
-      } else if (module === "payments" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof PAYMENTS_CLIENT !== "undefined" && PAYMENTS_CLIENT.init) PAYMENTS_CLIENT.init();
-      } else if (module === "reports" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof REPORTS_CLIENT !== "undefined" && REPORTS_CLIENT.init) REPORTS_CLIENT.init();
-        else if (typeof REPORT_CLIENT !== "undefined" && REPORT_CLIENT.init) REPORT_CLIENT.init();
-        else if (typeof REPORT_PAGE !== "undefined" && REPORT_PAGE.loadReports) REPORT_PAGE.loadReports();
-        else if (typeof REPAIR_REPORTS !== "undefined" && REPAIR_REPORTS.loadReports) REPAIR_REPORTS.loadReports();
-        else if (typeof REPORTS_PAGE !== "undefined" && REPORTS_PAGE.loadReports) REPORTS_PAGE.loadReports();
       } else if (module === "dashboard" && targetViewEl) {
         targetViewEl.style.display = "block";
-        if (typeof ORDERS_DASHBOARD_CLIENT !== "undefined" && ORDERS_DASHBOARD_CLIENT.init) ORDERS_DASHBOARD_CLIENT.init();
-        else if (typeof DASHBOARD_CLIENT !== "undefined" && DASHBOARD_CLIENT.init) DASHBOARD_CLIENT.init();
-        else if (typeof this.loadDashboard === "function") this.loadDashboard();
-      } else if (module === "leads" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof LEAD_CLIENT !== "undefined" && LEAD_CLIENT.init) LEAD_CLIENT.init();
-      } else if (module === "opportunities" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof OPPORTUNITY_CLIENT !== "undefined" && OPPORTUNITY_CLIENT.init) OPPORTUNITY_CLIENT.init();
-      } else if (module === "interactions" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof INTERACTION_CLIENT !== "undefined" && INTERACTION_CLIENT.init) INTERACTION_CLIENT.init();
-      } else if (module === "tasks" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof TASK_CLIENT !== "undefined" && TASK_CLIENT.init) TASK_CLIENT.init();
-      } else if (module === "assets" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof ASSET_PAGE !== "undefined" && ASSET_PAGE.init) ASSET_PAGE.init();
-      } else if (module === "assignments" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof ASSIGNMENT_PAGE !== "undefined" && ASSIGNMENT_PAGE.init) ASSIGNMENT_PAGE.init();
-      } else if (module === "transfers" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof TRANSFER_PAGE !== "undefined" && TRANSFER_PAGE.init) TRANSFER_PAGE.init();
-      } else if (module === "maintenance" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof MAINTENANCE_PAGE !== "undefined" && MAINTENANCE_PAGE.init) MAINTENANCE_PAGE.init();
-      } else if (module === "repairs" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof ORDERS_PAGE !== "undefined" && ORDERS_PAGE.init) ORDERS_PAGE.init();
-      } else if (module === "reception" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof RECEPTION_PAGE !== "undefined" && RECEPTION_PAGE.init) RECEPTION_PAGE.init();
-      } else if (module === "history" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof HISTORY_PAGE !== "undefined" && HISTORY_PAGE.init) HISTORY_PAGE.init();
-      } else if (module === "trips" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof TRIPS_CLIENT !== "undefined" && TRIPS_CLIENT.init) TRIPS_CLIENT.init();
-      } else if (module === "request" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof REQUEST_CLIENT !== "undefined" && REQUEST_CLIENT.init) REQUEST_CLIENT.init();
-      } else if (module === "approvals" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof APPROVALS_PAGE !== "undefined" && APPROVALS_PAGE.loadData) APPROVALS_PAGE.loadData();
-      } else if (module === "settlements" && targetViewEl) {
-        targetViewEl.style.display = "block";
-        if (typeof SETTLEMENTS_PAGE !== "undefined" && SETTLEMENTS_PAGE.loadData) SETTLEMENTS_PAGE.loadData();
+        if (typeof this.loadDashboard === "function") this.loadDashboard();
       } else if (module === "users" && targetViewEl) {
         targetViewEl.style.display = "block";
         if (typeof USERS_CLIENT !== "undefined" && USERS_CLIENT.init) USERS_CLIENT.init();
@@ -790,10 +719,36 @@ handleNavClick: function(itemEl) {
       var hdrQr = document.getElementById("btn-header-quick-qr");
       var dashSurvey = document.getElementById("btn-dash-new-survey");
       var dashOrder = document.getElementById("btn-dash-new-order");
-      if (hdrSurvey) hdrSurvey.style.display = this.hasPermission("survey.create") ? "inline-flex" : "none";
-      if (hdrQr) hdrQr.style.display = (this.hasPermission("delivery.update") || this.hasPermission("drawing.view") || this.hasPermission("order.view")) ? "inline-flex" : "none";
-      if (dashSurvey) dashSurvey.style.display = this.hasPermission("survey.create") ? "" : "none";
-      if (dashOrder) dashOrder.style.display = this.hasPermission("quotation.create") ? "" : "none";
+      var dashQr = document.getElementById("btn-dash-quick-qr");
+      var mobProd = document.getElementById("mob-nav-production");
+      var mobSurvey = document.getElementById("mob-nav-survey");
+      var mobQr = document.getElementById("mob-nav-qr");
+
+      var canSurvey = this.hasPermission("survey.create");
+      var canQuote = this.hasPermission("quotation.create");
+      var canQr = this.hasPermission("delivery.update") || this.hasPermission("drawing.view") || this.hasPermission("order.view") || this.hasPermission("package.qr_print");
+      var canProdMenu = this.hasPermission("production.stage_update") || this.hasPermission("order.view") || this.hasPermission("order.view_all");
+      var canViewFin = this.hasPermission("order.view_all") || this.hasPermission("report.view") || this.hasPermission("profit_report.view") || this.hasPermission("payment.create") || this.hasPermission("debt.view");
+      var canViewDebt = this.hasPermission("debt.view") || this.hasPermission("payment.create") || this.hasPermission("order.view_all");
+      var canViewMat = this.hasPermission("material.estimate") || this.hasPermission("material.issue") || this.hasPermission("material.expense_create") || this.hasPermission("order.view_all");
+
+      if (hdrSurvey) hdrSurvey.style.display = canSurvey ? "inline-flex" : "none";
+      if (hdrQr) hdrQr.style.display = canQr ? "inline-flex" : "none";
+      if (dashSurvey) dashSurvey.style.display = canSurvey ? "" : "none";
+      if (dashOrder) dashOrder.style.display = canQuote ? "" : "none";
+      if (dashQr) dashQr.style.display = canQr ? "" : "none";
+      if (mobProd) mobProd.style.display = canProdMenu ? "" : "none";
+      if (mobSurvey) mobSurvey.style.display = canSurvey ? "" : "none";
+      if (mobQr) mobQr.style.display = canQr ? "" : "none";
+
+      var cardVal = document.getElementById("dash-card-value");
+      var cardDebt = document.getElementById("dash-card-debt");
+      var cardLow = document.getElementById("dash-card-lowstock");
+      var panelDue = document.getElementById("dash-panel-due-payments");
+      if (cardVal) cardVal.style.display = canViewFin ? "" : "none";
+      if (cardDebt) cardDebt.style.display = canViewDebt ? "" : "none";
+      if (cardLow) cardLow.style.display = canViewMat ? "" : "none";
+      if (panelDue) panelDue.style.display = canViewDebt ? "" : "none";
     },
 
     loadDashboard: function() {
@@ -806,7 +761,10 @@ handleNavClick: function(itemEl) {
             self.stopPageLoading();
             if (res && res.success && res.data) self.renderDashboard(res.data);
           })
-          .withFailureHandler(function() { self.stopPageLoading(); })
+          .withFailureHandler(function(err) {
+            self.stopPageLoading();
+            self.showToast((err && err.message) || "Không thể tải Dashboard.", "error");
+          })
           .apiGetCarpentryDashboard(token);
       } else {
         self.stopPageLoading();
@@ -816,15 +774,25 @@ handleNavClick: function(itemEl) {
     renderDashboard: function(data) {
       if (!data) return;
       var k = data.kpi || {};
+      var perms = data.permissions || {};
       var setTxt = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
       setTxt("dash-kpi-inprod", UTILS.formatNumber(k.in_production_count || 0));
       setTxt("dash-kpi-installing", UTILS.formatNumber(k.installing_count || 0));
       setTxt("dash-kpi-upcoming", UTILS.formatNumber(k.upcoming_due_count || 0));
       setTxt("dash-kpi-delayed", UTILS.formatNumber(k.delayed_or_urgent_count || 0));
-      setTxt("dash-kpi-value", UTILS.formatCurrency(k.active_orders_value || 0));
-      setTxt("dash-kpi-debt", UTILS.formatCurrency(k.total_debt_receivable || 0));
+      setTxt("dash-kpi-value", k.active_orders_value !== null && k.active_orders_value !== undefined ? UTILS.formatCurrency(k.active_orders_value) : "—");
+      setTxt("dash-kpi-debt", k.total_debt_receivable !== null && k.total_debt_receivable !== undefined ? UTILS.formatCurrency(k.total_debt_receivable) : "—");
       setTxt("dash-kpi-drawing", UTILS.formatNumber(k.awaiting_drawing_count || 0) + " đơn");
-      setTxt("dash-kpi-lowstock", UTILS.formatNumber(k.low_stock_materials_count || 0) + " mã VT");
+      setTxt("dash-kpi-lowstock", (k.low_stock_materials_count !== null && k.low_stock_materials_count !== undefined ? UTILS.formatNumber(k.low_stock_materials_count) : "0") + " mã VT");
+
+      var cardVal = document.getElementById("dash-card-value");
+      var cardDebt = document.getElementById("dash-card-debt");
+      var cardLow = document.getElementById("dash-card-lowstock");
+      var panelDue = document.getElementById("dash-panel-due-payments");
+      if (cardVal && perms.can_view_financials === false) cardVal.style.display = "none";
+      if (cardDebt && perms.can_view_debt === false) cardDebt.style.display = "none";
+      if (cardLow && perms.can_view_materials === false) cardLow.style.display = "none";
+      if (panelDue && perms.can_view_debt === false) panelDue.style.display = "none";
 
       var urgEl = document.getElementById("dash-urgent-orders");
       var urgList = data.urgent_orders || [];
@@ -1223,6 +1191,12 @@ handleNavClick: function(itemEl) {
   // =========================================================================
   var CARPENTRY_HELPER = {
     metaCache: null,
+    _metaLoading: false,
+    _metaCallbacks: [],
+
+    invalidateMeta: function() {
+      this.metaCache = null;
+    },
 
     loadMeta: function(cb, force) {
       if (!force && this.metaCache) {
@@ -1234,18 +1208,22 @@ handleNavClick: function(itemEl) {
         if (cb) cb(null);
         return;
       }
+      if (cb) this._metaCallbacks.push(cb);
+      if (this._metaLoading && !force) return;
+      this._metaLoading = true;
       var self = this;
       google.script.run
         .withSuccessHandler(function(res) {
-          if (res && res.success && res.data) {
-            self.metaCache = res.data;
-            if (cb) cb(res.data);
-          } else {
-            if (cb) cb(null);
-          }
+          self._metaLoading = false;
+          var data = (res && res.success && res.data) ? res.data : null;
+          if (data) self.metaCache = data;
+          var q = self._metaCallbacks.splice(0, self._metaCallbacks.length);
+          q.forEach(function(fn) { try { fn(data || self.metaCache); } catch (e) {} });
         })
         .withFailureHandler(function() {
-          if (cb) cb(null);
+          self._metaLoading = false;
+          var q = self._metaCallbacks.splice(0, self._metaCallbacks.length);
+          q.forEach(function(fn) { try { fn(self.metaCache); } catch (e) {} });
         })
         .apiGetCarpentryMeta(token);
     },
@@ -1312,7 +1290,7 @@ handleNavClick: function(itemEl) {
         .withSuccessHandler(function(res) {
           if (!box) return;
           if (!res || !res.success || !res.data) {
-            box.innerHTML = '<div style="padding:12px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:13px;">' + UTILS.escapeHtml((res && res.error) || "Không tìm thấy kiện hàng hoặc đơn hàng.") + '</div>';
+            box.innerHTML = '<div style="padding:12px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:13px;">' + UTILS.escapeHtml((res && (res.message || res.error)) || "Không tìm thấy kiện hàng hoặc đơn hàng.") + '</div>';
             return;
           }
           var d = res.data;
@@ -1380,14 +1358,50 @@ handleNavClick: function(itemEl) {
 
     readFileAsBase64: function(file, cb) {
       if (!file) { if (cb) cb(null); return; }
+      var isCompressibleImage = /^image\/(jpeg|jpg|png|webp)$/i.test(file.type || "") && file.size > 350 * 1024;
       var reader = new FileReader();
       reader.onload = function(evt) {
-        var result = (evt && evt.target && evt.target.result) || "";
-        var base64 = String(result).indexOf(",") >= 0 ? String(result).split(",")[1] : String(result);
+        var dataUrl = String((evt && evt.target && evt.target.result) || "");
+        if (isCompressibleImage && typeof Image !== "undefined" && typeof document !== "undefined") {
+          var img = new Image();
+          img.onload = function() {
+            try {
+              var maxDim = 1600;
+              var w = img.width || 1;
+              var h = img.height || 1;
+              if (w > maxDim || h > maxDim) {
+                var ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
+              }
+              var canvas = document.createElement("canvas");
+              canvas.width = w;
+              canvas.height = h;
+              var ctx2d = canvas.getContext("2d");
+              if (ctx2d) {
+                ctx2d.drawImage(img, 0, 0, w, h);
+                var compressedUrl = canvas.toDataURL("image/jpeg", 0.78);
+                var cB64 = compressedUrl.indexOf(",") >= 0 ? compressedUrl.split(",")[1] : compressedUrl;
+                var safeName = String(file.name || "photo.jpg").replace(/\.(png|webp)$/i, ".jpg");
+                if (cb) cb({ file_name: safeName, mime_type: "image/jpeg", base64: cB64 });
+                return;
+              }
+            } catch (eComp) {}
+            var rawB64 = dataUrl.indexOf(",") >= 0 ? dataUrl.split(",")[1] : dataUrl;
+            if (cb) cb({ file_name: file.name || "file.jpg", mime_type: file.type || "image/jpeg", base64: rawB64 });
+          };
+          img.onerror = function() {
+            var rawB64 = dataUrl.indexOf(",") >= 0 ? dataUrl.split(",")[1] : dataUrl;
+            if (cb) cb({ file_name: file.name || "file.jpg", mime_type: file.type || "image/jpeg", base64: rawB64 });
+          };
+          img.src = dataUrl;
+          return;
+        }
+        var base64 = dataUrl.indexOf(",") >= 0 ? dataUrl.split(",")[1] : dataUrl;
         if (cb) cb({ file_name: file.name || "file.jpg", mime_type: file.type || "image/jpeg", base64: base64 });
       };
       reader.onerror = function() {
-        APP.showToast("Không đọc được file tải lên.", "danger");
+        APP.showToast("Không đọc được file tải lên.", "error");
         if (cb) cb(null);
       };
       reader.readAsDataURL(file);

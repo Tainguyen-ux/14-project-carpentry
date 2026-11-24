@@ -150,7 +150,10 @@
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
           var sel = document.getElementById("draw-order-select");
-          if (!sel || !res || !res.success || !res.data) return;
+          if (!sel || !res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Không tải được danh sách đơn hàng.", "error");
+            return;
+          }
           var list = res.data.items || [];
           sel.innerHTML = '<option value="">-- Chọn đơn hàng xem bản vẽ &amp; tem QR --</option>' +
             list.map(function(o) { return '<option value="' + o.id + '">' + UTILS.escapeHtml(o.order_code + " - " + o.customer_name + " (" + o.title + ")") + '</option>'; }).join("");
@@ -160,6 +163,7 @@
             self.loadDetail(self.selectedOrderId);
           }
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiGetFurnitureOrders(AUTH.getToken(), {}, 1, 50);
     },
 
@@ -170,11 +174,15 @@
       google.script.run
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
-          if (!res || !res.success || !res.data) return;
+          if (!res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Không tải được hồ sơ bản vẽ.", "error");
+            return;
+          }
           self.renderFiles(res.data.files_photos || []);
           self.renderPackages(res.data.packages_qr || []);
         })
-        .apiGetFurnitureOrderDetail(AUTH.getToken(), oid);
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
+        .apiGetFurnitureOrderDetail(AUTH.getToken(), oid, { sections: ["files_photos", "packages_qr"] });
     },
 
     renderFiles: function(files) {
@@ -212,6 +220,23 @@
     openUploadModal: function() {
       if (!this.selectedOrderId) { APP.showToast("Vui lòng chọn đơn hàng trước.", "warning"); return; }
       this.filePayload = null;
+      var canDraw = APP.hasPermission("drawing.upload");
+      var canPhoto = APP.hasPermission("photo.upload");
+      var catSel = document.getElementById("drw-category");
+      if (catSel) {
+        var opts = [];
+        if (canDraw) {
+          opts.push('<option value="DRAWING_3D">📐 Bản vẽ 3D phối cảnh duyệt</option>');
+          opts.push('<option value="DRAWING_2D">📐 Bản vẽ kỹ thuật bóc tách 2D</option>');
+        }
+        if (canPhoto) {
+          opts.push('<option value="SURVEY_PHOTO">📷 Ảnh hiện trạng đo đạc</option>');
+          opts.push('<option value="PRODUCTION_PROGRESS">🏭 Ảnh tiến độ tại xưởng</option>');
+          opts.push('<option value="QC_WORKSHOP">✅ Ảnh QC nghiệm thu tại xưởng</option>');
+          opts.push('<option value="HANDOVER_DONE">🏠 Ảnh bàn giao hoàn thiện</option>');
+        }
+        catSel.innerHTML = opts.join("");
+      }
       var m = document.getElementById("modal-upload-drawing");
       if (m) m.classList.add("open");
     },
@@ -233,12 +258,13 @@
             self.closeUploadModal();
             self.loadDetail(self.selectedOrderId);
           } else {
-            APP.showToast((res && res.error) || "Lỗi upload file.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Lỗi upload file.", "error");
           }
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiUploadOrderFileOrPhoto(AUTH.getToken(), {
           order_id: this.selectedOrderId,
-          file_category: (document.getElementById("drw-category") || {}).value || "DRAWING_2D",
+          file_category: (document.getElementById("drw-category") || {}).value || "PRODUCTION_PROGRESS",
           title_or_room: (document.getElementById("drw-title") || {}).value || "",
           file_name: this.filePayload.file_name,
           mime_type: this.filePayload.mime_type,
@@ -268,9 +294,10 @@
             self.closeQrGenModal();
             self.loadDetail(self.selectedOrderId);
           } else {
-            APP.showToast((res && res.error) || "Lỗi tạo tem QR.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Lỗi tạo tem QR.", "error");
           }
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiGenerateOrScanPackageQr(AUTH.getToken(), {
           mode: "GENERATE",
           order_id: this.selectedOrderId,
@@ -280,5 +307,5 @@
         });
     }
   };
-  APP.registerModule("drawings", DRAWINGS_CLIENT, "view-drawings");
+  APP.registerModule("drawings", DRAWINGS_CLIENT);
 </script>

@@ -128,10 +128,14 @@
       google.script.run
         .withSuccessHandler(function(res) {
           APP.stopPageLoading();
-          if (!res || !res.success || !res.data) return;
+          if (!res || !res.success || !res.data) {
+            APP.showToast((res && (res.message || res.error)) || "Không tải được danh sách khách hàng.", "error");
+            return;
+          }
           self.listCache = res.data.items || [];
           self.renderList(self.listCache, res.data.pagination);
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiGetCustomers(AUTH.getToken(), { keyword: kw, project_type: pt }, this.page, this.pageSize);
     },
 
@@ -210,12 +214,14 @@
           APP.stopPageLoading();
           if (res && res.success) {
             APP.showToast(res.message || "Đã lưu chủ đầu tư!", "success");
+            CARPENTRY_HELPER.invalidateMeta();
             self.closeFormModal();
             self.loadCustomers(1);
           } else {
-            APP.showToast((res && res.error) || "Không thể lưu chủ đầu tư.", "error");
+            APP.showToast((res && (res.message || res.error)) || "Không thể lưu chủ đầu tư.", "error");
           }
         })
+        .withFailureHandler(function(err) { APP.stopPageLoading(); APP.showToast((err && err.message) || String(err), "error"); })
         .apiSaveCustomer(AUTH.getToken(), {
           id: (document.getElementById("cf-id") || {}).value || "",
           full_name: (document.getElementById("cf-name") || {}).value || "",
@@ -227,5 +233,5 @@
         });
     }
   };
-  APP.registerModule("customers", CUSTOMERS_CLIENT, "view-customers");
+  APP.registerModule("customers", CUSTOMERS_CLIENT);
 </script>

@@ -305,10 +305,12 @@ const ExportedCoreLibrary = Object.freeze({
 });
 
 // --- VM #2: Project (`14-project-carpentry/src`) ---
+let htmlLookupMissCount = 0;
 function resolveClaspHtmlFile(gasName) {
   const normalized = String(gasName).replace(/\\/g, "/");
   const fullPath = path.join(projectSrcDir, normalized + ".html");
   if (!fs.existsSync(fullPath)) {
+    htmlLookupMissCount++;
     throw new Error("No HTML file with name: " + gasName);
   }
   return fs.readFileSync(fullPath, "utf8");
@@ -386,6 +388,7 @@ console.log(`  [PASS] Loaded all ${projectGsFiles.length} .gs files linked to Co
 // =========================================================================
 const renderedHtml = projectVm.doGet({}).getContent();
 {
+  assert.strictEqual(htmlLookupMissCount, 0, `doGet() must resolve all HTML templates/includes on first attempt (0 misses, got ${htmlLookupMissCount})`);
   assert.ok(!renderedHtml.includes("Lỗi khởi động ứng dụng"), "doGet() must render cleanly without errors");
   [
     "view-dashboard", "view-surveys", "view-orders", "view-drawings",
@@ -687,10 +690,14 @@ let mdfMatId, hingeMatId;
   assert.strictEqual(scanRes.success, true, scanRes.message);
   assert.strictEqual(scanRes.data.drawings_and_photos.length, 1);
 
-  // 5.10 Đội lắp đặt bị cảnh báo/chặn xuất xưởng khi chưa thu Đợt 2! Sau khi thu Đợt 2 -> Xuất xưởng thành công
+  // 5.10 Đội lắp đặt bị cảnh báo/chặn xuất xưởng khi chưa thu Đợt 2! Không được tự override; sau khi thu Đợt 2 -> Xuất xưởng thành công
   const blockedShip = projectVm.apiUpdateDeliveryInstallStatus(installerToken, { order_id: ord.id, status: "INSTALLING" });
   assert.strictEqual(blockedShip.success, false);
   assert.strictEqual(blockedShip.errorCode, "STAGE2_UNPAID");
+
+  const illegalOverride = projectVm.apiUpdateDeliveryInstallStatus(installerToken, { order_id: ord.id, status: "INSTALLING", override_payment_check: true });
+  assert.strictEqual(illegalOverride.success, false, "Installer must NOT bypass Stage 2 payment gate");
+  assert.strictEqual(illegalOverride.errorCode, "OVERRIDE_FORBIDDEN");
 
   const stage2Due = ordPays[1].due_amount;
   const pay2 = projectVm.apiCollectOrderPayment(accountantToken, { payment_id: ordPays[1].id, amount: stage2Due, payment_channel: "BANK_QR" });
@@ -700,8 +707,44 @@ let mdfMatId, hingeMatId;
   assert.strictEqual(okShip.success, true, okShip.message);
   assert.strictEqual(okShip.data.status, "INSTALLING");
 
-  // 5.11 Nghiệm thu bàn giao & thu nốt Đợt 3 -> COMPLETED, nợ = 0, kích hoạt bảo hành 24 tháng
+  // Kiểm tra RBAC tách quyền & tải dữ liệu không N+1 trước khi chốt nghiệm thu
+  const foremanBoard = projectVm.apiGetFurnitureOrders(foremanToken, { include_items: true }, 1, 10);
+  assert.strictEqual(foremanBoard.success, true);
+  assert.ok(Array.isArray(foremanBoard.data.items[0].items) && foremanBoard.data.items[0].items.length === 4, "include_items must embed order items inline to prevent N+1 RPCs");
+  assert.strictEqual(foremanBoard.data.items[0].total_amount, null, "Foreman (without order.view_all) must NOT receive contract value");
+  assert.strictEqual(foremanBoard.data.items[0].gross_profit, null, "Foreman (without profit_report.view) must NOT receive gross profit");
+
+  const selectiveDetail = projectVm.apiGetFurnitureOrderDetail(foremanToken, ord.id, { sections: ["materials"] });
+  assert.strictEqual(selectiveDetail.success, true);
+  assert.strictEqual(selectiveDetail.data.materials.length, 2, "Selective detail must return requested materials section");
+  assert.strictEqual(selectiveDetail.data.files_photos.length, 0, "Unrequested sections must not be loaded");
+  assert.strictEqual(selectiveDetail.data.order.gross_profit, null, "Detail must mask gross_profit for foreman");
+
+  const installFilterRes = projectVm.apiGetFurnitureOrders(installerToken, { statuses: "READY_TO_SHIP,INSTALLING,COMPLETED" }, 1, 10);
+  assert.strictEqual(installFilterRes.success, true);
+  assert.strictEqual(installFilterRes.data.items.length, 1);
+
+  const foremanDash = projectVm.apiGetCarpentryDashboard(foremanToken);
+  assert.strictEqual(foremanDash.success, true);
+  assert.strictEqual(foremanDash.data.kpi.active_orders_value, null, "Dashboard must hide active_orders_value for foreman");
+  assert.strictEqual(foremanDash.data.kpi.total_debt_receivable, null, "Dashboard must hide debt for foreman");
+  assert.strictEqual(foremanDash.data.due_payments.length, 0, "Dashboard must hide due_payments for foreman");
+
+  const accReport = projectVm.apiGetCarpentryReports(accountantToken, {});
+  assert.strictEqual(accReport.success, true);
+  assert.strictEqual(accReport.data.can_see_profit, false);
+  assert.strictEqual(accReport.data.summary.estimated_gross_profit, null, "Accountant without profit_report.view must not see gross profit");
+
+  // 5.11 Nghiệm thu: Installer không có payment.create không được kèm thu tiền đợt cuối; Admin chốt nghiệm thu + thu Đợt 3 -> COMPLETED
   const stage3Due = ordPays[2].due_amount;
+  const denyInstallerPay = projectVm.apiCompleteOrderAcceptance(installerToken, {
+    order_id: ord.id,
+    acceptance_signer: "Trần Quốc Bảo",
+    final_payment_amount: stage3Due
+  });
+  assert.strictEqual(denyInstallerPay.success, false, "Installer without payment.create must be rejected when passing final_payment_amount > 0");
+  assert.strictEqual(denyInstallerPay.errorCode, "AUTH_FORBIDDEN");
+
   const accRes = projectVm.apiCompleteOrderAcceptance(adminToken, {
     order_id: ord.id,
     acceptance_signer: "Trần Quốc Bảo",
@@ -838,7 +881,12 @@ let mdfMatId, hingeMatId;
     }
   }
   assert.deepStrictEqual(missingDomIds, [], "Missing static DOM IDs: " + missingDomIds.join(", "));
-  console.log(`  [PASS] TEST 7: Verified JS syntax (${scriptBlocksChecked} blocks), 100% static DOM IDs, 100% RPC parity & permission-only UI guards.`);
+  assert.ok(renderedHtml.includes("toggleSidebar: function"), "APP.toggleSidebar() must be defined for mobile nav");
+  for (const relHtml of pageFiles) {
+    const raw = fs.readFileSync(path.join(projectSrcDir, relHtml), "utf8");
+    assert.ok(!/\(res\s*&&\s*res\.error\)/.test(raw), `${relHtml} must read res.message before res.error`);
+  }
+  console.log(`  [PASS] TEST 7: Verified JS syntax (${scriptBlocksChecked} blocks), 100% static DOM IDs, 100% RPC parity, permission-only UI guards & zero-miss HTML includes.`);
 }
 
 console.log("=== ALL 14-PROJECT-CARPENTRY INTEGRATION TESTS PASSED (100%) ===\n");

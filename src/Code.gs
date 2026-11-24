@@ -32,11 +32,22 @@ function doGet(e) {
   }
 }
 
+function resolveHtmlCandidates_(filename) {
+  var name = String(filename || "").trim();
+  if (name.indexOf("/") !== -1) {
+    return [name];
+  }
+  if (name.indexOf("Page_") === 0) {
+    return ["pages/" + name, name, "ui/" + name];
+  }
+  return ["ui/" + name, name, "pages/" + name];
+}
+
 /**
  * Tìm nạp Template HTML hỗ trợ cả đường dẫn thư mục con của clasp (ui/..., pages/...) và tên phẳng
  */
 function createHtmlTemplate_(filename) {
-  var candidates = [filename, "ui/" + filename, "pages/" + filename];
+  var candidates = resolveHtmlCandidates_(filename);
   var lastErr = null;
   for (var i = 0; i < candidates.length; i++) {
     try {
@@ -50,10 +61,10 @@ function createHtmlTemplate_(filename) {
 
 /**
  * Nhúng các thành phần CSS, JS và trang con vào Index.html
- * Ví dụ: <?!= include('Css') ?>, <?!= include('Js_App') ?>, <?!= include('Page_Sample') ?>
+ * Ví dụ: <?!= include('ui/Css') ?>, <?!= include('ui/Js_App') ?>, <?!= include('pages/Page_Surveys') ?>
  */
 function include(filename) {
-  var candidates = [filename, "ui/" + filename, "pages/" + filename];
+  var candidates = resolveHtmlCandidates_(filename);
   var lastErr = null;
   for (var i = 0; i < candidates.length; i++) {
     try {

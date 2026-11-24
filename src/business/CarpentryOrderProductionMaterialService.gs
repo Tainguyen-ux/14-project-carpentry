@@ -8,9 +8,9 @@
  * - Tạo & Quét Tem QR Kiện hàng (`PACKAGE_QR`) gắn thẳng link Bản vẽ Drive cho thợ lắp đặt
  */
 
-function recalculateOrderFinancials_(app, orderId, nowStr) {
+function recalculateOrderFinancials_(app, orderId, nowStr, preloadedOrder) {
   var ordSheet = PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME;
-  var ord = app.Data.findRow(ordSheet, function(o) { return String(o.id) === String(orderId); });
+  var ord = preloadedOrder || app.Data.findRow(ordSheet, function(o) { return String(o.id) === String(orderId); });
   if (!ord) return null;
 
   var mats = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_MATERIALS.NAME, function(m) { return String(m.order_id) === String(orderId); });
@@ -44,17 +44,26 @@ function recalculateOrderFinancials_(app, orderId, nowStr) {
 function apiGetFurnitureOrders(token, filters, page, pageSize) {
   var app = getCore_(token);
   try {
-    app.Authorization.requireAny([
+    var actor = app.Authorization.requireAny([
       "order.view", "order.view_all", "quotation.create", "production.stage_update",
-      "payment.create", "debt.view", "delivery.update", "menu.orders", "menu.production"
+      "drawing.view", "material.estimate", "material.issue",
+      "payment.create", "debt.view", "delivery.update", "acceptance.sign",
+      "menu.orders", "menu.production", "menu.drawings", "menu.materials", "menu.install_warranty"
     ]);
     filters = filters || {};
     var policy = getCarpentryPolicyConfig_(app);
     var todayYmd = getCarpentryTodayYmd_(app);
     var st = String(filters.status || "").trim().toUpperCase();
+    var statusList = null;
+    if (Array.isArray(filters.statuses) && filters.statuses.length > 0) {
+      statusList = filters.statuses.map(function(x) { return String(x || "").trim().toUpperCase(); }).filter(Boolean);
+    } else if (typeof filters.statuses === "string" && filters.statuses.trim()) {
+      statusList = filters.statuses.split(",").map(function(x) { return String(x || "").trim().toUpperCase(); }).filter(Boolean);
+    }
     var kw = String(filters.keyword || "").trim().toLowerCase();
     var urgentOnly = String(filters.urgent_only || "").toUpperCase() === "TRUE";
     var awaitingDraw = String(filters.awaiting_drawing || "").toUpperCase() === "TRUE";
+    var includeItems = filters.include_items === true || String(filters.include_items || "").toUpperCase() === "TRUE";
 
     var rows = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME);
     var out = [];
@@ -62,7 +71,11 @@ function apiGetFurnitureOrders(token, filters, page, pageSize) {
       var raw = rows[i];
       if (!raw || !raw.id) continue;
       var eo = enrichFurnitureOrderRow_(raw, todayYmd, policy);
-      if (st && st !== "ALL" && eo.status !== st) continue;
+      if (statusList && statusList.length > 0) {
+        if (statusList.indexOf(eo.status) === -1) continue;
+      } else if (st && st !== "ALL" && eo.status !== st) {
+        continue;
+      }
       if (urgentOnly && !eo.is_urgent_delay && !eo.is_late) continue;
       if (awaitingDraw && eo.drawing_status === "APPROVED") continue;
       if (kw) {
@@ -73,24 +86,48 @@ function apiGetFurnitureOrders(token, filters, page, pageSize) {
                   String(eo.title || "").toLowerCase().indexOf(kw) !== -1;
         if (!hit) continue;
       }
-      out.push(eo);
+      out.push(sanitizeOrderForActor_(eo, actor));
     }
     out.reverse();
 
     var paged = app.Data.paginate(out, page || 1, pageSize || policy.defaultPageSize);
-    return toRpcJson_(app.Utils.buildResponse(true, { items: paged.items, pagination: paged.pagination, total: paged.pagination.total }, "Tải danh sách đơn hàng xưởng thành công."));
+    var pagedItems = paged.items;
+    if (includeItems && pagedItems.length > 0) {
+      var idSet = {};
+      for (var pi = 0; pi < pagedItems.length; pi++) idSet[String(pagedItems[pi].id)] = true;
+      var allOrdItems = app.Data.getAll(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_ITEMS.NAME);
+      var byOrderId = {};
+      for (var ai = 0; ai < allOrdItems.length; ai++) {
+        var it = allOrdItems[ai];
+        if (!it || !it.id) continue;
+        var oidKey = String(it.order_id);
+        if (!idSet[oidKey]) continue;
+        if (!byOrderId[oidKey]) byOrderId[oidKey] = [];
+        byOrderId[oidKey].push(it);
+      }
+      pagedItems = pagedItems.map(function(o) {
+        return Object.assign({}, o, { items: byOrderId[String(o.id)] || [] });
+      });
+    }
+
+    return toRpcJson_(app.Utils.buildResponse(true, { items: pagedItems, pagination: paged.pagination, total: paged.pagination.total }, "Tải danh sách đơn hàng xưởng thành công."));
   } catch (err) {
     return toRpcJson_(app.Utils.buildResponse(false, null, err.message, "ORDER_LIST_ERROR"));
   }
 }
 
-function apiGetFurnitureOrderDetail(token, idOrCode) {
+function apiGetFurnitureOrderDetail(token, idOrCode, options) {
   var app = getCore_(token);
   try {
-    app.Authorization.requireAny([
+    var actor = app.Authorization.requireAny([
       "order.view", "order.view_all", "drawing.view", "production.stage_update",
-      "material.estimate", "material.issue", "payment.create", "delivery.update", "acceptance.sign"
+      "material.estimate", "material.issue", "payment.create", "debt.view",
+      "delivery.update", "acceptance.sign", "warranty.manage"
     ]);
+    options = options || {};
+    var reqSections = Array.isArray(options.sections) && options.sections.length > 0 ? options.sections : null;
+    var want = function(name) { return !reqSections || reqSections.indexOf(name) !== -1; };
+
     var key = String(idOrCode || "").trim();
     var policy = getCarpentryPolicyConfig_(app);
     var todayYmd = getCarpentryTodayYmd_(app);
@@ -101,17 +138,40 @@ function apiGetFurnitureOrderDetail(token, idOrCode) {
     if (!ord) return toRpcJson_(app.Utils.buildResponse(false, null, "Không tìm thấy đơn hàng.", "NOT_FOUND"));
 
     var oid = String(ord.id);
-    var items = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_ITEMS.NAME, function(x) { return String(x.order_id) === oid; });
-    var payments = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, function(p) { return String(p.order_id) === oid; });
-    var materials = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_MATERIALS.NAME, function(m) { return String(m.order_id) === oid; }).reverse();
-    var filesPhotos = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_FILES_PHOTOS.NAME, function(f) { return String(f.order_id) === oid; }).reverse();
-    var logs = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.PRODUCTION_PROGRESS.NAME, function(l) { return String(l.order_id) === oid; }).reverse();
-    var pkgQrs = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.PACKAGE_QR.NAME, function(q) { return String(q.order_id) === oid; });
-    var warranties = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.WARRANTY_TICKETS.NAME, function(w) { return String(w.order_id) === oid; }).reverse();
-    var cust = app.Data.findRow(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME, function(c) { return String(c.id) === String(ord.customer_id); });
+    var canSeePayments = actorHasAnyPerm_(actor, ["order.view_all", "payment.create", "debt.view", "quotation.create", "acceptance.sign"]);
+    var canSeeFiles = actorHasAnyPerm_(actor, ["drawing.view", "drawing.upload", "photo.upload", "order.view", "order.view_all", "delivery.update", "package.qr_print"]);
+    var canSeeMaterials = actorHasAnyPerm_(actor, ["material.estimate", "material.issue", "material.expense_create", "profit_report.view", "order.view_all"]);
+    var canSeeMatCost = actorHasAnyPerm_(actor, ["profit_report.view", "material.issue", "material.estimate", "material.expense_create"]);
+
+    var items = want("items")
+      ? app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_ITEMS.NAME, function(x) { return String(x.order_id) === oid; })
+      : [];
+    var payments = (want("payments") && canSeePayments)
+      ? app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_PAYMENTS.NAME, function(p) { return String(p.order_id) === oid; })
+      : [];
+    var materials = (want("materials") && canSeeMaterials)
+      ? app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_MATERIALS.NAME, function(m) { return String(m.order_id) === oid; }).map(function(m) {
+          return canSeeMatCost ? m : Object.assign({}, m, { unit_cost: null, total_cost: null });
+        }).reverse()
+      : [];
+    var filesPhotos = (want("files_photos") && canSeeFiles)
+      ? app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_FILES_PHOTOS.NAME, function(f) { return String(f.order_id) === oid; }).reverse()
+      : [];
+    var logs = want("progress_logs")
+      ? app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.PRODUCTION_PROGRESS.NAME, function(l) { return String(l.order_id) === oid; }).reverse()
+      : [];
+    var pkgQrs = want("packages_qr")
+      ? app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.PACKAGE_QR.NAME, function(q) { return String(q.order_id) === oid; })
+      : [];
+    var warranties = want("warranty_tickets")
+      ? app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.WARRANTY_TICKETS.NAME, function(w) { return String(w.order_id) === oid; }).reverse()
+      : [];
+    var cust = want("customer")
+      ? app.Data.findRow(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME, function(c) { return String(c.id) === String(ord.customer_id); })
+      : null;
 
     return toRpcJson_(app.Utils.buildResponse(true, {
-      order: enrichFurnitureOrderRow_(ord, todayYmd, policy),
+      order: sanitizeOrderForActor_(enrichFurnitureOrderRow_(ord, todayYmd, policy), actor),
       items: items,
       payments: payments,
       materials: materials,
@@ -241,16 +301,19 @@ function apiSaveQuotationOrder(token, dto) {
         updated_at: nowStr
       };
 
+      var returnedPayments = [];
       if (existingOrd) {
         app.Data.updateById(ordSheet, ordId, ordRow);
         app.Data.replaceByColumn(itemSheet, "order_id", ordId, itemRows);
+        returnedPayments = app.Data.findRows(paySheet, function(x) { return String(x.order_id) === ordId; });
       } else {
         app.Data.insertOne(ordSheet, ordRow);
-        for (var k = 0; k < itemRows.length; k++) app.Data.insertOne(itemSheet, itemRows[k]);
+        app.Data.insertBatch(itemSheet, itemRows);
 
-        // Tạo các đợt thanh toán chia theo cấu hình (VD 40-40-20)
+        // Tạo các đợt thanh toán chia theo cấu hình (VD 40-40-20) — đọc bảng ORDER_PAYMENTS 1 lần ngoài vòng lặp + ghi batch
         var stageTitles = ["Đợt 1 — Ký HĐ chốt cọc", "Đợt 2 — Xong QC tại xưởng (Trước giao)", "Đợt 3 — Nghiệm thu lắp đặt hoàn tất"];
         var triggers = ["ON_SIGN", "READY_TO_SHIP", "ON_HANDOVER"];
+        var existingPayRows = app.Data.getAll(paySheet);
         var allocated = 0;
         var payRows = [];
         for (var p = 0; p < schedPcts.length; p++) {
@@ -259,7 +322,7 @@ function apiSaveQuotationOrder(token, dto) {
           allocated += amt;
           payRows.push({
             id: app.Utils.generateUUID(),
-            payment_code: generateDailyCarpentryCode_(app.Data.getAll(paySheet).concat(payRows), "payment_code", "TT", todayYmd),
+            payment_code: generateDailyCarpentryCode_(existingPayRows.concat(payRows), "payment_code", "TT", todayYmd),
             order_id: ordId,
             order_code: ordCode,
             customer_id: cust.id,
@@ -279,7 +342,8 @@ function apiSaveQuotationOrder(token, dto) {
             updated_at: nowStr
           });
         }
-        for (var pr = 0; pr < payRows.length; pr++) app.Data.insertOne(paySheet, payRows[pr]);
+        app.Data.insertBatch(paySheet, payRows);
+        returnedPayments = payRows;
 
         app.Data.updateById(PROJECT_CONFIG.BUSINESS_SHEETS.CUSTOMERS.NAME, cust.id, {
           total_orders: (Number(cust.total_orders) || 0) + 1,
@@ -299,9 +363,9 @@ function apiSaveQuotationOrder(token, dto) {
 
       app.Audit.log({ actor: actor, action: existingOrd ? "UPDATE_QUOTATION" : "CREATE_QUOTATION", entity_type: ordSheet, entity_id: ordId, entity_number: ordCode, after: ordRow, message: "Lập báo giá " + ordCode + " (" + totalAmt.toLocaleString("en-US") + "đ)" });
       return app.Utils.buildResponse(true, {
-        order: enrichFurnitureOrderRow_(ordRow, todayYmd, policy),
+        order: sanitizeOrderForActor_(enrichFurnitureOrderRow_(ordRow, todayYmd, policy), actor),
         items: itemRows,
-        payments: app.Data.findRows(paySheet, function(x) { return String(x.order_id) === ordId; })
+        payments: returnedPayments
       }, "Đã lưu đơn hàng / báo giá " + ordCode + " (" + totalAmt.toLocaleString("en-US") + "đ)!");
     }, 15000);
 
@@ -314,8 +378,12 @@ function apiSaveQuotationOrder(token, dto) {
 function apiApproveQuotationAndStartOrder(token, dto) {
   var app = getCore_(token);
   try {
-    var actor = app.Authorization.requireAny(["quotation.approve", "order.approve"]);
     dto = dto || {};
+    var actionMode = String(dto.action || "START_PRODUCTION").toUpperCase();
+    var actor = (actionMode === "APPROVE_DRAWING_ONLY")
+      ? app.Authorization.requireAny(["quotation.approve", "order.approve"])
+      : app.Authorization.require("order.approve");
+
     var ordKey = String(dto.order_id || "").trim();
     var ordSheet = PROJECT_CONFIG.BUSINESS_SHEETS.FURNITURE_ORDERS.NAME;
     var ord = app.Data.findRow(ordSheet, function(o) { return String(o.id) === ordKey || String(o.order_code) === ordKey; });
@@ -324,25 +392,41 @@ function apiApproveQuotationAndStartOrder(token, dto) {
     var policy = getCarpentryPolicyConfig_(app);
     var todayYmd = getCarpentryTodayYmd_(app);
     var nowStr = getCarpentryNowStr_(app);
-    var actionMode = String(dto.action || "START_PRODUCTION").toUpperCase();
 
-    var upd = {
-      drawing_status: "APPROVED",
-      status: actionMode === "APPROVE_DRAWING_ONLY" ? (ord.status === "QUOTED" ? "DEPOSITED" : ord.status) : "IN_PRODUCTION",
-      updated_at: nowStr
-    };
-    if (dto.foreman_id) {
-      var fUser = app.Data.findRow("USERS", function(u) { return String(u.id) === String(dto.foreman_id); });
-      if (fUser) { upd.foreman_id = fUser.id; upd.foreman_name = fUser.full_name || fUser.username; }
+    var upd;
+    var auditAction = "APPROVE_ORDER";
+    var msg;
+    if (actionMode === "CANCEL_ORDER") {
+      upd = { status: "CANCELLED", updated_at: nowStr };
+      if (dto.notes) upd.notes = String(dto.notes).trim();
+      auditAction = "CANCEL_ORDER";
+      msg = "Đã hủy đơn hàng " + ord.order_code + ".";
+    } else {
+      upd = {
+        drawing_status: "APPROVED",
+        status: actionMode === "APPROVE_DRAWING_ONLY" ? (ord.status === "QUOTED" ? "DEPOSITED" : ord.status) : "IN_PRODUCTION",
+        updated_at: nowStr
+      };
+      msg = actionMode === "APPROVE_DRAWING_ONLY"
+        ? ("Đã duyệt báo giá & bản vẽ đơn " + ord.order_code + "!")
+        : ("Đã duyệt bản vẽ & chuyển đơn " + ord.order_code + " sang Đang sản xuất!");
     }
-    if (dto.installer_id) {
-      var iUser = app.Data.findRow("USERS", function(u) { return String(u.id) === String(dto.installer_id); });
-      if (iUser) { upd.installer_id = iUser.id; upd.installer_name = iUser.full_name || iUser.username; }
+
+    if (dto.foreman_id || dto.installer_id) {
+      var allUsers = app.Data.getAll("USERS");
+      if (dto.foreman_id) {
+        var fUser = allUsers.find(function(u) { return String(u.id) === String(dto.foreman_id); });
+        if (fUser) { upd.foreman_id = fUser.id; upd.foreman_name = fUser.full_name || fUser.username; }
+      }
+      if (dto.installer_id) {
+        var iUser = allUsers.find(function(u) { return String(u.id) === String(dto.installer_id); });
+        if (iUser) { upd.installer_id = iUser.id; upd.installer_name = iUser.full_name || iUser.username; }
+      }
     }
 
     app.Data.updateById(ordSheet, ord.id, upd);
-    app.Audit.log({ actor: actor, action: "APPROVE_ORDER", entity_type: ordSheet, entity_id: ord.id, entity_number: ord.order_code, after: upd, message: "Duyệt bản vẽ & Ra lệnh SX đơn " + ord.order_code });
-    return toRpcJson_(app.Utils.buildResponse(true, enrichFurnitureOrderRow_(Object.assign({}, ord, upd), todayYmd, policy), "Đã duyệt bản vẽ & chuyển đơn " + ord.order_code + " sang Đang sản xuất!"));
+    app.Audit.log({ actor: actor, action: auditAction, entity_type: ordSheet, entity_id: ord.id, entity_number: ord.order_code, after: upd, message: msg });
+    return toRpcJson_(app.Utils.buildResponse(true, sanitizeOrderForActor_(enrichFurnitureOrderRow_(Object.assign({}, ord, upd), todayYmd, policy), actor), msg));
   } catch (err) {
     return toRpcJson_(app.Utils.buildResponse(false, null, err.message, "APPROVE_ORDER_ERROR"));
   }
@@ -456,9 +540,18 @@ function apiEstimateOrIssueMaterial(token, dto) {
       };
       app.Data.insertOne(mSheet, row);
 
-      var profitSummary = recalculateOrderFinancials_(app, ord.id, nowStr);
+      var profitSummary = recalculateOrderFinancials_(app, ord.id, nowStr, ord);
+      var safeFinancials = profitSummary;
+      if (profitSummary && !actorHasPerm_(actor, "profit_report.view")) {
+        safeFinancials = {
+          material_cost_total: profitSummary.material_cost_total,
+          labor_extra_cost: null,
+          gross_profit: null,
+          gross_margin_pct: null
+        };
+      }
       app.Audit.log({ actor: actor, action: issuedQty > 0 ? "ISSUE_MATERIAL" : "ESTIMATE_MATERIAL", entity_type: mSheet, entity_id: row.id, entity_number: row.issue_code, after: row, message: (issuedQty > 0 ? "Xuất kho " : "Dự trù ") + qtyForCost + " " + row.unit + " " + matName + " cho " + ord.order_code });
-      return app.Utils.buildResponse(true, { material_row: row, order_financials: profitSummary }, "Đã ghi nhận vật tư " + matName + " (" + row.issue_code + ")!");
+      return app.Utils.buildResponse(true, { material_row: row, order_financials: safeFinancials }, "Đã ghi nhận vật tư " + matName + " (" + row.issue_code + ")!");
     }, 10000);
 
     return toRpcJson_(result);
@@ -484,7 +577,14 @@ function apiUpdateItemProductionStage(token, dto) {
       var stageInfo = getCarpentryStageInfo_(stages, targetStage);
 
       var itemSheet = PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_ITEMS.NAME;
-      var item = app.Data.findRow(itemSheet, function(x) { return String(x.id) === itemId; });
+      var allItems = app.Data.getAll(itemSheet);
+      var item = null;
+      for (var fi = 0; fi < allItems.length; fi++) {
+        if (allItems[fi] && String(allItems[fi].id) === itemId) {
+          item = allItems[fi];
+          break;
+        }
+      }
       if (!item) return app.Utils.buildResponse(false, null, "Không tìm thấy hạng mục sản xuất.", "ITEM_NOT_FOUND");
 
       var fromStage = item.production_stage;
@@ -495,7 +595,7 @@ function apiUpdateItemProductionStage(token, dto) {
         updated_at: nowStr
       });
 
-      var siblingItems = app.Data.findRows(itemSheet, function(x) { return String(x.order_id) === String(item.order_id); });
+      var siblingItems = allItems.filter(function(x) { return x && String(x.order_id) === String(item.order_id); });
       var totalStages = Math.max(1, stages.length);
       var sumRatio = 0;
       var allQcDone = true;
@@ -605,9 +705,9 @@ function apiGenerateOrScanPackageQr(token, dto) {
           scanned_by_name: "",
           created_at: nowStr
         };
-        app.Data.insertOne(pkgSheet, row);
         created.push(row);
       }
+      app.Data.insertBatch(pkgSheet, created);
       return toRpcJson_(app.Utils.buildResponse(true, created, "Đã tạo " + count + " tem QR kiện hàng cho đơn " + ord.order_code + "!"));
     }
 
@@ -618,7 +718,14 @@ function apiGenerateOrScanPackageQr(token, dto) {
 
     var upCode = rawCode.toUpperCase();
     var pkgSheet2 = PROJECT_CONFIG.BUSINESS_SHEETS.PACKAGE_QR.NAME;
-    var matchedPkg = app.Data.findRow(pkgSheet2, function(q) { return String(q.qr_code || "").toUpperCase() === upCode; });
+    var allPkgRows = app.Data.getAll(pkgSheet2);
+    var matchedPkg = null;
+    for (var pi = 0; pi < allPkgRows.length; pi++) {
+      if (allPkgRows[pi] && String(allPkgRows[pi].qr_code || "").toUpperCase() === upCode) {
+        matchedPkg = allPkgRows[pi];
+        break;
+      }
+    }
     var orderKey = matchedPkg ? String(matchedPkg.order_id) : upCode;
 
     var policy = getCarpentryPolicyConfig_(app);
@@ -629,21 +736,27 @@ function apiGenerateOrScanPackageQr(token, dto) {
     if (!ord2) return toRpcJson_(app.Utils.buildResponse(false, null, "Không tìm thấy kiện hàng hoặc đơn hàng '" + rawCode + "'.", "NOT_FOUND"));
 
     if (matchedPkg && dto.mark_status) {
+      if (!actorHasAnyPerm_(actorScan, ["delivery.update", "package.qr_print"])) {
+        return toRpcJson_(app.Utils.buildResponse(false, null, "Bạn không có quyền cập nhật trạng thái kiện hàng (delivery.update).", "AUTH_FORBIDDEN"));
+      }
+      var newSt = String(dto.mark_status).toUpperCase();
+      var scanNow = getCarpentryNowStr_(app);
       app.Data.updateById(pkgSheet2, matchedPkg.id, {
-        status: String(dto.mark_status).toUpperCase(),
-        scanned_at: getCarpentryNowStr_(app),
+        status: newSt,
+        scanned_at: scanNow,
         scanned_by_name: String(actorScan.full_name || actorScan.username)
       });
+      matchedPkg = Object.assign({}, matchedPkg, { status: newSt, scanned_at: scanNow, scanned_by_name: String(actorScan.full_name || actorScan.username) });
     }
 
     var allDrawings = app.Data.findRows(PROJECT_CONFIG.BUSINESS_SHEETS.ORDER_FILES_PHOTOS.NAME, function(f) {
       return String(f.order_id) === String(ord2.id);
     }).reverse();
-    var allPackages = app.Data.findRows(pkgSheet2, function(q) { return String(q.order_id) === String(ord2.id); });
+    var allPackages = allPkgRows.filter(function(q) { return q && String(q.order_id) === String(ord2.id); });
 
     return toRpcJson_(app.Utils.buildResponse(true, {
       scanned_package: matchedPkg,
-      order: enrichFurnitureOrderRow_(ord2, todayYmd, policy),
+      order: sanitizeOrderForActor_(enrichFurnitureOrderRow_(ord2, todayYmd, policy), actorScan),
       packages: allPackages,
       drawings_and_photos: allDrawings
     }, "Đã tra cứu kiện hàng & mở bộ bản vẽ Drive!"));
