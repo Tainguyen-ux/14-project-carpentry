@@ -32,6 +32,31 @@ function doGet(e) {
   }
 }
 
+/**
+ * Điểm vào POST quản trị có xác thực Admin (hỗ trợ nạp dữ liệu demo từ CLI sau deploy)
+ */
+function doPost(e) {
+  try {
+    var body = {};
+    if (e && e.postData && e.postData.contents) {
+      body = JSON.parse(e.postData.contents);
+    }
+    if (body && body.action === "seed_demo") {
+      var app = getCore_("");
+      if (!app.isInitialized()) app.ensureInitialized(false);
+      var loginRes = app.Auth.login({ username: body.username || "", password: body.password || "" });
+      if (!loginRes || !loginRes.success || !loginRes.data || !loginRes.data.token) {
+        return ContentService.createTextOutput(JSON.stringify({ success: false, message: "Xác thực quản trị thất bại." })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var res = apiSeedCarpentryDemoData(loginRes.data.token, { reset: body.reset !== false });
+      return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
+    }
+    return ContentService.createTextOutput(JSON.stringify({ success: false, message: "Unsupported action." })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, message: String(err && err.message ? err.message : err) })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 function resolveHtmlCandidates_(filename) {
   var name = String(filename || "").trim();
   if (name.indexOf("/") !== -1) {

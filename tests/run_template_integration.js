@@ -376,7 +376,8 @@ const projectGsFiles = [
   "business/CarpentryCoreHelper.gs",
   "business/CarpentryCustomerSurveyCatalogService.gs",
   "business/CarpentryOrderProductionMaterialService.gs",
-  "business/CarpentryPaymentInstallWarrantyReportService.gs"
+  "business/CarpentryPaymentInstallWarrantyReportService.gs",
+  "business/CarpentryDemoSeedService.gs"
 ];
 for (const f of projectGsFiles) {
   vm.runInContext(fs.readFileSync(path.join(projectSrcDir, f), "utf8"), projectVm, { filename: "carpentry/" + f });
@@ -887,6 +888,39 @@ let mdfMatId, hingeMatId;
     assert.ok(!/\(res\s*&&\s*res\.error\)/.test(raw), `${relHtml} must read res.message before res.error`);
   }
   console.log(`  [PASS] TEST 7: Verified JS syntax (${scriptBlocksChecked} blocks), 100% static DOM IDs, 100% RPC parity, permission-only UI guards & zero-miss HTML includes.`);
+}
+
+// =========================================================================
+// TEST 8: NẠP DỮ LIỆU DEMO ON-DEMAND (CHỈ ADMIN) & KIỂM CHỨNG 12 BẢNG
+// =========================================================================
+{
+  const denySeed = projectVm.apiSeedCarpentryDemoData(foremanToken, { reset: true });
+  assert.strictEqual(denySeed.success, false, "Non-admin must NOT run demo data seed");
+
+  const seedRes = projectVm.apiSeedCarpentryDemoData(adminToken, { reset: true });
+  assert.strictEqual(seedRes.success, true, seedRes.message);
+  assert.strictEqual(seedRes.data.counts.catalog, 14);
+  assert.strictEqual(seedRes.data.counts.customers, 8);
+  assert.strictEqual(seedRes.data.counts.orders, 7);
+  assert.strictEqual(seedRes.data.counts.order_payments, 21);
+
+  const demoDash = projectVm.apiGetCarpentryDashboard(adminToken);
+  assert.strictEqual(demoDash.success, true);
+  assert.ok(demoDash.data.kpi.in_production_count >= 3, "Demo dashboard should show active production orders");
+  assert.ok(demoDash.data.kpi.delayed_or_urgent_count >= 2, "Demo dashboard should highlight urgent/late orders");
+  assert.ok(demoDash.data.kpi.low_stock_materials_count >= 2, "Demo dashboard should show low-stock alerts");
+  assert.ok(demoDash.data.due_payments.length >= 3, "Demo dashboard should show due installment payments");
+
+  const demoRep = projectVm.apiGetCarpentryReports(adminToken, {});
+  assert.strictEqual(demoRep.success, true);
+  assert.strictEqual(demoRep.data.summary.orders_count, 7, "All 7 demo orders must appear in current month report");
+  assert.ok(demoRep.data.summary.estimated_gross_profit > 0);
+
+  const demoQr = projectVm.apiGenerateOrScanPackageQr(adminToken, { mode: "SCAN", code: seedRes.data.sample_qr_codes[0] });
+  assert.strictEqual(demoQr.success, true, demoQr.message);
+  assert.ok(demoQr.data.drawings_and_photos.length >= 1);
+
+  console.log("  [PASS] TEST 8: Admin-only demo seed verified (14 catalog, 8 customers, 7 orders, 21 payments, QR scan & P&L reports).");
 }
 
 console.log("=== ALL 14-PROJECT-CARPENTRY INTEGRATION TESTS PASSED (100%) ===\n");
